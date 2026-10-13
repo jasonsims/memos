@@ -15,6 +15,7 @@ import { InstanceProvider, useInstance } from "@/contexts/InstanceContext";
 import { useLiveMemoRefresh } from "@/hooks/useLiveMemoRefresh";
 import { useTokenRefreshOnFocus } from "@/hooks/useTokenRefreshOnFocus";
 import { queryClient } from "@/lib/query-client";
+import { initializePendo } from "@/utils/pendo";
 import router from "./router";
 import { applyLocaleEarly } from "./utils/i18n";
 import { applyThemeEarly } from "./utils/theme";
@@ -22,6 +23,9 @@ import { applyThemeEarly } from "./utils/theme";
 // Apply theme and locale early to prevent flash
 applyThemeEarly();
 applyLocaleEarly();
+
+// Boot Pendo once per page load, before the first render (fork-only, see FORK.md).
+initializePendo();
 
 // Inner component that initializes contexts
 function AppInitializer({ children }: { children: React.ReactNode }) {

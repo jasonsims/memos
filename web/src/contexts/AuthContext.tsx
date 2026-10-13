@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { clearAccessToken, getAccessToken } from "@/auth-state";
 import { authServiceClient, refreshAccessToken, userServiceClient } from "@/connect";
 import { userKeys } from "@/hooks/useUserQueries";
@@ -9,6 +9,7 @@ import type {
   UserSetting_TagsSetting,
   UserSetting_WebhooksSetting,
 } from "@/types/proto/api/user_service_pb";
+import { clearPendoSession, identifyPendoVisitor } from "@/utils/pendo";
 
 interface AuthState {
   currentUser: User | undefined;
@@ -152,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("[AuthContext] Failed to sign out:", error);
     } finally {
       clearAccessToken();
+      clearPendoSession();
       setState(UNAUTHENTICATED_STATE);
       queryClient.clear();
     }
@@ -189,6 +191,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [queryClient],
   );
+
+  // Every sign-in path (password, sign-up, SSO callback, session restore) ends in `initialize`.
+  // Identify the user to Pendo once identity and general settings have settled, and again when
+  // either changes, so visitor metadata stays current (fork-only, see FORK.md).
+  useEffect(() => {
+    if (state.currentUser && state.isUserSettingsInitialized) {
+      identifyPendoVisitor(state.currentUser, state.userGeneralSetting);
+    }
+  }, [state.currentUser, state.isUserSettingsInitialized, state.userGeneralSetting]);
 
   // Memoize context value to prevent unnecessary re-renders of consumers
   const value = useMemo(

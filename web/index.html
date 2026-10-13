@@ -16,6 +16,16 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <!-- memos.metadata.head -->
     <title>Memos</title>
+    <!-- Fork-only: Pendo (Novus) install snippet. Lifecycle calls live in src/utils/pendo.ts; see FORK.md. -->
+    <script>
+    (function(apiKey){
+        (function(p,e,n,d,o){var v,w,x,y,z;o=p[d]=p[d]||{};o._q=o._q||[];
+        v=['initialize','identify','updateOptions','pageLoad','track', 'trackAgent'];for(w=0,x=v.length;w<x;++w)(function(m){
+        o[m]=o[m]||function(){o._q[m===v[0]?'unshift':'push']([m].concat([].slice.call(arguments,0)));};})(v[w]);
+        y=e.createElement(n);y.async=!0;y.src='https://cdn.pendo-dev.pendo-dev.com/agent/static/'+apiKey+'/pendo.js';
+        z=e.getElementsByTagName(n)[0];z.parentNode.insertBefore(y,z);})(window,document,'script','pendo');
+    })('4280006f-c4cb-47d7-a0e2-dad271c4a3d8');
+    </script>
   </head>
   <body class="text-base w-full min-h-svh">
     <div id="root" class="relative w-full min-h-full"></div>
