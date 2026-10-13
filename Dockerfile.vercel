@@ -1,0 +1,48 @@
+# Vercel Container Runtime image. Vercel detects this file at the repo root, builds it,
+# and routes all traffic to the container on $PORT (set PORT=5230 in project env vars).
+# Unlike scripts/Dockerfile, this builds the frontend too, since Vercel builds from source.
+
+FROM node:24-alpine AS frontend
+WORKDIR /frontend-build
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./web/
+COPY web/patches ./web/patches
+RUN cd web && pnpm install --frozen-lockfile
+COPY web ./web
+RUN mkdir -p server/frontend && cd web && pnpm release
+
+FROM golang:1.27.2-alpine AS backend
+WORKDIR /backend-build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=frontend /frontend-build/server/frontend/dist ./server/frontend/dist
+# The build context has no .git, so derive the YY.MM CalVer from the build date.
+ARG COMMIT=unknown
+RUN VERSION="$(date -u +%y.%m)" && \
+    CGO_ENABLED=0 go build \
+      -trimpath \
+      -ldflags="-s -w -X github.com/usememos/memos/internal/version.Version=${VERSION} -X github.com/usememos/memos/internal/version.Commit=${COMMIT}" \
+      -tags netgo,osusergo \
+      -o memos \
+      ./cmd/memos
+
+FROM alpine:3.21
+RUN apk add --no-cache tzdata ca-certificates && \
+    addgroup -g 10001 -S nonroot && \
+    adduser -u 10001 -S -G nonroot nonroot && \
+    mkdir -p /tmp/memos && chmod 1777 /tmp/memos
+COPY --from=backend /backend-build/memos /usr/local/memos/memos
+
+# /tmp/memos is ephemeral on Vercel: data lives in Postgres, attachments in DB or S3 storage.
+ENV TZ="UTC" \
+    MEMOS_ADDR=0.0.0.0 \
+    MEMOS_PORT=5230 \
+    MEMOS_DRIVER=postgres \
+    MEMOS_DATA=/tmp/memos
+
+USER nonroot
+EXPOSE 5230
+
+# Prefer an explicit MEMOS_DSN, else the Neon integration's connection strings.
+ENTRYPOINT ["sh", "-c", "export MEMOS_DSN=\"${MEMOS_DSN:-${DATABASE_URL_UNPOOLED:-$DATABASE_URL}}\"; exec /usr/local/memos/memos"]

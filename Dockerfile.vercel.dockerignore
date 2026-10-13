@@ -1,0 +1,20 @@
+# BuildKit uses this instead of .dockerignore for Dockerfile.vercel, which needs web/.
+/build/
+/bin/
+/tmp/
+/memos
+/.pnpm-store/
+/.worktrees/
+/web/node_modules/
+/web/dist/
+/server/frontend/dist/
+/docs/
+/.github/
+/.git/
+/.env
+/.env.*
+/.idea/
+/.vscode/
+/.claude/
+/.vercel/
+**/.DS_Store

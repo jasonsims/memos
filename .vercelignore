@@ -1,0 +1,12 @@
+# Keep CLI uploads small; Dockerfile.vercel rebuilds everything from source.
+/build/
+/bin/
+/tmp/
+/memos
+/.pnpm-store/
+/.worktrees/
+web/node_modules/
+web/dist/
+/docs/
+/.claude/
+**/.DS_Store
