@@ -1,0 +1,77 @@
+# Fork Notes
+
+This is a personal fork of [usememos/memos](https://github.com/usememos/memos), deployed to Vercel.
+
+## Branches
+
+| Branch | Purpose |
+| --- | --- |
+| `main` | Pristine mirror of `upstream/main`. Never commit to it directly. |
+| `deploy` | Default branch. `main` plus fork-only changes; Vercel deploys from here. |
+
+## Remotes
+
+| Remote | URL | Use |
+| --- | --- | --- |
+| `origin` | `git@github.com:jasonsims/memos.git` | The fork. Push here. |
+| `upstream` | `https://github.com/usememos/memos.git` | Fetch only; push is disabled. |
+
+To recreate `upstream` in a fresh clone:
+
+```bash
+git remote add upstream https://github.com/usememos/memos.git
+git remote set-url --push upstream DISABLE
+```
+
+## Syncing With Upstream
+
+```bash
+git fetch upstream
+git switch main && git merge --ff-only upstream/main && git push origin main
+git switch deploy && git merge main && git push origin deploy
+```
+
+`main` must always fast-forward. If `--ff-only` fails, a commit landed on `main` by mistake; move it to `deploy`.
+
+Keep the fork's changes in fork-only files where possible so upstream merges stay conflict-free.
+
+## Fork-Only Files
+
+| File | Purpose |
+| --- | --- |
+| `FORK.md` | This file. |
+| `.claude/rules/fork.md` | Fork-specific Claude Code instructions (see below). |
+| `Dockerfile.vercel` | Vercel Container Runtime build: frontend, Go binary, Alpine runtime. |
+| `Dockerfile.vercel.dockerignore` | Build context for `Dockerfile.vercel`; upstream's `.dockerignore` excludes `web/`. |
+| `.vercelignore` | Keeps `node_modules` and build output out of Vercel CLI uploads. |
+
+## Agent Instructions
+
+Upstream keeps its agent instructions in `AGENTS.md`. Claude Code reads `AGENTS.md` only when there is no `CLAUDE.md`,
+`.claude/CLAUDE.md`, or `CLAUDE.local.md`, so adding any of those would silently drop upstream's instructions.
+
+Fork instructions live in `.claude/rules/fork.md` instead. Claude Code loads every `.claude/rules/*.md` file alongside
+`AGENTS.md` (or alongside a `CLAUDE.md`, if upstream ever adds one), and upstream is unlikely to add a file with this name.
+Add more fork rules as additional files under `.claude/rules/`, prefixed `fork-`.
+
+## Vercel Deployment
+
+- Runtime: Vercel Container Runtime (beta), built from `Dockerfile.vercel`, Hobby plan.
+- Database: Neon Postgres from the Vercel Marketplace. The entrypoint uses `MEMOS_DSN`, else `DATABASE_URL_UNPOOLED`, else
+  `DATABASE_URL`. SQLite and `MEMOS_DATA` (`/tmp/memos`) are ephemeral on Vercel.
+- Required env vars: `PORT=5230` in every environment, `MEMOS_INSTANCE_URL` set to the public URL.
+- Attachment storage: set Admin > Storage to Database (or S3). Never Local.
+
+Known limits:
+
+- Request bodies cap at 4.5 MB, so attachments larger than that fail to upload.
+- Requests cap at 300s on Hobby, so the SSE live-update stream reconnects periodically. The client resyncs on reconnect.
+- The SSE hub is in-memory per instance, so live updates may lag across concurrent instances until the next reconnect.
+- Instances scale to zero after 5 idle minutes; the next request pays a cold start.
+
+Test the image locally:
+
+```bash
+docker build --platform linux/amd64 -f Dockerfile.vercel -t memos-vercel:test .
+docker run --rm -p 5230:5230 -e DATABASE_URL="postgresql://..." memos-vercel:test
+```
