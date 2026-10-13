@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { clearAccessToken, getAccessToken } from "@/auth-state";
 import { authServiceClient, refreshAccessToken, userServiceClient } from "@/connect";
 import { userKeys } from "@/hooks/useUserQueries";
+import { clearPendoSession, identifyPendoVisitor } from "@/lib/pendo";
 import type {
   User,
   UserSetting_GeneralSetting,
@@ -154,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAccessToken();
       setState(UNAUTHENTICATED_STATE);
       queryClient.clear();
+      clearPendoSession();
     }
   }, [queryClient]);
 
@@ -189,6 +191,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [queryClient],
   );
+
+  // Identify the Pendo visitor after every sign-in path settles, and again when the profile or settings change.
+  useEffect(() => {
+    if (state.isInitialized && state.currentUser) {
+      identifyPendoVisitor(state.currentUser, state.userGeneralSetting);
+    }
+  }, [state.isInitialized, state.currentUser, state.userGeneralSetting]);
 
   // Memoize context value to prevent unnecessary re-renders of consumers
   const value = useMemo(
