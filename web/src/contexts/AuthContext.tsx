@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { clearAccessToken, getAccessToken } from "@/auth-state";
 import { authServiceClient, refreshAccessToken, userServiceClient } from "@/connect";
 import { userKeys } from "@/hooks/useUserQueries";
+import { clearPendoSession, identifyPendoVisitor } from "@/lib/pendo";
 import type {
   User,
   UserSetting_GeneralSetting,
@@ -152,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("[AuthContext] Failed to sign out:", error);
     } finally {
       clearAccessToken();
+      clearPendoSession();
       setState(UNAUTHENTICATED_STATE);
       queryClient.clear();
     }
@@ -189,6 +191,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [queryClient],
   );
+
+  // Identify the signed-in user in Pendo once their settings have loaded, and again when the profile or settings
+  // change. Every sign-in path (password, SSO callback, sign-up, restored session) settles here via initialize().
+  useEffect(() => {
+    if (state.currentUser && state.isUserSettingsInitialized) {
+      identifyPendoVisitor(state.currentUser, state.userGeneralSetting);
+    }
+  }, [state.currentUser, state.isUserSettingsInitialized, state.userGeneralSetting]);
 
   // Memoize context value to prevent unnecessary re-renders of consumers
   const value = useMemo(

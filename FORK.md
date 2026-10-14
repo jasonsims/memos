@@ -44,6 +44,18 @@ Keep the fork's changes in fork-only files where possible so upstream merges sta
 | `Dockerfile.vercel` | Vercel Container Runtime build: frontend, Go binary, Alpine runtime. |
 | `Dockerfile.vercel.dockerignore` | Build context for `Dockerfile.vercel`; upstream's `.dockerignore` excludes `web/`. |
 | `.vercelignore` | Keeps `node_modules` and build output out of Vercel CLI uploads. |
+| `web/src/lib/pendo.ts` | Pendo lifecycle: initialize at app entry, identify the signed-in user, clear on sign-out, URL transforms. |
+| `web/src/types/pendo.d.ts` | Types for the `window.pendo` agent that the snippet in `web/index.html` installs. |
+
+## Upstream Files Changed
+
+These upstream files carry small fork-only edits; re-check them when an upstream merge conflicts.
+
+| File | Change |
+| --- | --- |
+| `web/index.html` | Pendo install snippet in `<head>`. |
+| `web/src/main.tsx` | Calls `initializePendo()` once at app entry. |
+| `web/src/contexts/AuthContext.tsx` | Identifies the signed-in user in Pendo; clears the Pendo session in `logout()`. |
 
 ## Agent Instructions
 
