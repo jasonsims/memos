@@ -19,7 +19,7 @@ const AdminSignIn = () => {
       title={t("auth.admin-sign-in")}
       subtitle={t("auth.admin-sign-in-tip")}
     >
-      <PasswordSignInForm />
+      <PasswordSignInForm entry="admin" />
       <p className="mt-5 text-center text-sm">
         <Link to={ROUTES.AUTH} className="inline-flex items-center gap-1 text-primary hover:underline" viewTransition>
           <ArrowLeftIcon className="h-3.5 w-3.5 rtl:rotate-180" />

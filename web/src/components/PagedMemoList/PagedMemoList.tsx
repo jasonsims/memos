@@ -12,14 +12,16 @@ import { useInfiniteMemos } from "@/hooks/useMemoQueries";
 import { hoistMemoToFront } from "@/hooks/useMemoSorting";
 import { combineCELFilters } from "@/lib/cel-filter";
 import { DEFAULT_LIST_MEMOS_PAGE_SIZE, LOADING_INDICATOR_DELAY_MS } from "@/lib/constants";
+import { trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
+import { resolveCollectionRoute } from "@/router/routes";
 import { State } from "@/types/proto/api/common_pb";
 import type { Memo } from "@/types/proto/api/memo_service_pb";
 import { useTranslate } from "@/utils/i18n";
 import ColumnGrid, { ColumnGridUntrappedProvider, columnCountForWidth, GRID_GAP } from "../ColumnGrid";
 import MemoFilters from "../MemoFilters";
 import Placeholder from "../Placeholder";
-import MemoListError from "./MemoListError";
+import MemoListError, { classifyMemoListError } from "./MemoListError";
 import { estimateMemoCardHeight } from "./memoCardHeight";
 
 // Memo identity for React keys and grid planning. The pages use it for their renderer keys too,
@@ -30,6 +32,11 @@ export const getMemoKey = (memo: Memo) => memo.name;
 // Columns never stretch past this, so 2 columns on a wide monitor stay readable and the
 // grid centers in the leftover space instead of filling it.
 const MAX_COLUMN_WIDTH = 420;
+
+const SEARCH_ERROR_OUTCOMES = { invalid: "invalid_expression", denied: "access_denied", load: "load_error" } as const;
+
+// Module scope, so a list that remounts for a search it already reported does not report it again.
+let lastReportedSearch: string | undefined;
 
 const Loader = () => (
   <div className="w-full flex flex-row justify-center items-center py-8">
@@ -239,6 +246,36 @@ const PagedMemoList = (props: Props) => {
   // Only a query the user typed can be edited or cleared from the error; facet and scope
   // filters are fixed by the route.
   const hasSearch = filters.some(isSearchFilter);
+
+  // One completed search per distinct query and scope, once its first page settles; loading
+  // more pages does not report it again. Lengths and counts only, never the query.
+  const searchKey = hasSearch ? [props.state, props.contextFilter, props.filter].join("\n") : undefined;
+  const firstPage = data?.pages[0];
+  useEffect(() => {
+    if (!searchKey) {
+      lastReportedSearch = undefined;
+      return;
+    }
+    if (searchKey === lastReportedSearch || (!firstPage && !isInitialError)) return;
+    lastReportedSearch = searchKey;
+    trackPendoEvent("memo_search_completed", () => {
+      const searchFilters = filters.filter(isSearchFilter);
+      // A failed first page shows the error, not any stale page still cached.
+      const page = isInitialError ? undefined : firstPage;
+      return {
+        search_mode: searchFilters.some((filter) => filter.factor === "celSearch") ? "cel" : "text",
+        term_count: searchFilters.length,
+        results_count: page?.memos.length,
+        has_more_results: page ? Boolean(page.nextPageToken) : undefined,
+        outcome: page ? (page.memos.length > 0 ? "results" : "zero_results") : SEARCH_ERROR_OUTCOMES[classifyMemoListError(error)],
+        memo_state: State[props.state || State.NORMAL],
+        has_view_filter: memoView !== undefined,
+        space_scoped: Boolean(resolveCollectionRoute(window.location.pathname).spaceName),
+      };
+    });
+    // Runs when the search or its first page changes; the other values are read as they are then.
+  }, [searchKey, firstPage, isInitialError]);
+
   const errorNotice =
     !isDisplayPending && isError ? (
       <MemoListError

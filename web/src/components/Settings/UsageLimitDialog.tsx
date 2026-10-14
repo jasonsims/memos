@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { findUsageLimit, USAGE_LIMIT_METRICS, useSetUsageLimit, useUsageLimits } from "@/hooks/useUsageLimitQueries";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { UsageLimit_Metric } from "@/types/proto/api/instance_service_pb";
 import type { User } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -93,6 +94,18 @@ function UsageLimitDialog({ open, onOpenChange, target, candidates }: Props) {
           existing: findUsageLimit(limits, metric, owner),
         });
       }
+      // Which limits changed, never which user they belong to.
+      trackPendoEvent("usage_limits_updated", () => {
+        const changed = USAGE_LIMIT_METRICS.filter((metric) => inputs[metric] !== savedInputs[metric]);
+        return {
+          action: "updated",
+          target_kind: forAll ? "all_users" : "user",
+          changed_metrics: changed.map((metric) => UsageLimit_Metric[metric]),
+          removed_metric_count: changed.filter((metric) => savedValue(metric) === undefined).length,
+          // A user's 0 means no limit for that user.
+          unlimited_metric_count: changed.filter((metric) => savedValue(metric) === 0n).length,
+        };
+      });
       toast.success(t("setting.usage-limits.saved"));
       onOpenChange(false);
     } catch (error) {

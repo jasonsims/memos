@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { findUsageLimit, USAGE_LIMIT_METRICS, useSetUsageLimit, useUsageLimits } from "@/hooks/useUsageLimitQueries";
 import { useListUsers } from "@/hooks/useUserQueries";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
 import { UsageLimit_Metric } from "@/types/proto/api/instance_service_pb";
 import { User } from "@/types/proto/api/user_service_pb";
@@ -61,6 +62,11 @@ const UsageLimitsSection = () => {
         const existing = findUsageLimit(limits, metric, removeTarget.name);
         if (existing) await setUsageLimit.mutateAsync({ metric, user: removeTarget.name, value: undefined, existing });
       }
+      trackPendoEvent("usage_limits_updated", () => ({
+        action: "removed",
+        target_kind: "user",
+        removed_metric_count: USAGE_LIMIT_METRICS.filter((metric) => findUsageLimit(limits, metric, removeTarget.name)).length,
+      }));
       toast.success(t("setting.usage-limits.removed"));
     } catch (error) {
       handleError(error, toast.error, { context: "Remove usage limits" });

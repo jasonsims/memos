@@ -1,9 +1,14 @@
-import { getQuotaExceededMessage } from "@/lib/error";
+import { getQuotaExceededMessage, trackUsageLimitReached } from "@/lib/error";
 
 export const errorService = {
-  getErrorMessage(error: unknown): string {
+  /**
+   * Pass `operation` when the message is shown directly rather than through handleError, so a usage limit
+   * refusal is still reported to Pendo with what the user was doing.
+   */
+  getErrorMessage(error: unknown, operation?: string): string {
     const limitMessage = getQuotaExceededMessage(error);
     if (limitMessage !== undefined) {
+      if (operation) trackUsageLimitReached(error, operation);
       return limitMessage;
     }
 

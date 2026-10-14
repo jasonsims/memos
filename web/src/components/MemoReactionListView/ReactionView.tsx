@@ -37,7 +37,7 @@ const ReactionView = (props: Props) => {
   const hasReaction = users.some((user) => currentUser && user.username === currentUser.username);
   const readonly = memo.state === State.ARCHIVED;
 
-  const { handleReactionClick } = useReactionActions({ memo });
+  const { handleReactionClick } = useReactionActions({ memo, entryPoint: "pill" });
 
   const isClickable = Boolean(currentUser) && !readonly;
   const label = (

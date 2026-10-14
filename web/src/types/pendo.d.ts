@@ -2,6 +2,9 @@
 
 type PendoMetadataValue = string | number | boolean;
 
+/** Values a track event property may hold; an undefined property is left out of the event. */
+type PendoTrackValue = string | number | boolean | string[];
+
 interface PendoVisitor {
   id: string;
   email?: string;
@@ -25,6 +28,8 @@ interface PendoInitializeOptions extends PendoIdentity {
 interface PendoAgent {
   initialize: (options: PendoInitializeOptions) => void;
   identify: (identity: PendoIdentity) => void;
+  /** Stubbed by the install snippet, so events tracked before the agent script loads are queued. */
+  track: (trackType: string, properties?: Record<string, PendoTrackValue | undefined>) => void;
   /** Not stubbed by the install snippet, so it only exists once the agent script has loaded. */
   clearSession?: () => void;
 }

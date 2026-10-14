@@ -1,5 +1,6 @@
 import { BinaryReader } from "@bufbuild/protobuf/wire";
-import { type Code, ConnectError } from "@connectrpc/connect";
+import { Code, ConnectError } from "@connectrpc/connect";
+import { toPendoText, trackPendoEvent } from "@/lib/pendo";
 import { formatFileSize } from "@/utils/format";
 
 /** google.rpc.ErrorInfo, the mandatory detail on every server error (AIP-193). */
@@ -106,6 +107,41 @@ export function getQuotaExceededMessage(error: unknown): string | undefined {
   }
 }
 
+// One refusal can be shown by more than one handler; it is still one limit reached.
+const reportedQuotaErrors = new WeakSet<ConnectError>();
+
+/** Reports a QUOTA_EXCEEDED refusal to Pendo, once per error, with what the user was doing. */
+export function trackUsageLimitReached(error: unknown, operation?: string): void {
+  const info = getErrorInfo(error);
+  if (info?.reason !== ERROR_REASON_QUOTA_EXCEEDED || !(error instanceof ConnectError) || reportedQuotaErrors.has(error)) {
+    return;
+  }
+  reportedQuotaErrors.add(error);
+  trackPendoEvent("usage_limit_reached", () => {
+    const { metric, limit, usage } = info.metadata;
+    return { metric, limit: limit ? Number(limit) : undefined, usage: usage ? Number(usage) : undefined, operation };
+  });
+}
+
+/** Error fields shared by failure track events. */
+export interface ErrorTrackProperties {
+  error_reason?: string;
+  error_code?: string;
+  quota_metric?: string;
+  error_message?: string;
+}
+
+/** An error's ErrorInfo reason, Connect code and a scrubbed message, for track events. */
+export function getErrorTrackProperties(error: unknown): ErrorTrackProperties {
+  const info = getErrorInfo(error);
+  return {
+    error_reason: info?.reason || undefined,
+    error_code: error instanceof ConnectError ? Code[error.code] : undefined,
+    quota_metric: info?.reason === ERROR_REASON_QUOTA_EXCEEDED ? info.metadata.metric : undefined,
+    error_message: toPendoText(getErrorMessage(error)),
+  };
+}
+
 function formatWait(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.ceil(seconds / 60);
@@ -162,6 +198,7 @@ export function handleError(
   const errorMessage = options?.context ? `${contextPrefix}${getErrorMessage(error, fallback)}` : getErrorMessage(error, fallback);
 
   console.error(error);
+  trackUsageLimitReached(error, options?.context);
   toast(errorMessage);
   options?.onError?.(error);
 }

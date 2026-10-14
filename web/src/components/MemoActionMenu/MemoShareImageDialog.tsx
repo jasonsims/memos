@@ -3,6 +3,8 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { trackPendoEvent } from "@/lib/pendo";
+import type { Memo } from "@/types/proto/api/memo_service_pb";
 import { useTranslate } from "@/utils/i18n";
 import { useMemoViewContext } from "../MemoView/MemoViewContext";
 import MemoShareImagePreview from "./MemoShareImagePreview";
@@ -18,6 +20,21 @@ interface MemoShareImageDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
+
+const trackImageExport = (
+  memo: Memo,
+  renderWidth: number,
+  exportMethod: "download" | "native_share",
+  outcome: "success" | "failed" | "cancelled" | "unsupported",
+) =>
+  trackPendoEvent("memo_image_exported", () => ({
+    export_method: exportMethod,
+    outcome,
+    render_width: renderWidth,
+    memo_name: memo.name,
+    has_attachments: memo.attachments.length > 0,
+    content_length: memo.content.length,
+  }));
 
 const MemoShareImageDialog = ({ open, onOpenChange }: MemoShareImageDialogProps) => {
   const t = useTranslate();
@@ -48,13 +65,15 @@ const MemoShareImageDialog = ({ open, onOpenChange }: MemoShareImageDialogProps)
       anchor.download = buildMemoShareImageFileName(memo.name);
       anchor.click();
       URL.revokeObjectURL(url);
+      trackImageExport(memo, previewRenderWidth, "download", "success");
       toast.success(t("memo.share.image-downloaded"));
     } catch {
+      trackImageExport(memo, previewRenderWidth, "download", "failed");
       toast.error(t("memo.share.image-download-failed"));
     } finally {
       setIsRendering(false);
     }
-  }, [createShareBlob, memo.name, t]);
+  }, [createShareBlob, memo, previewRenderWidth, t]);
 
   const handleNativeShare = useCallback(async () => {
     if (typeof navigator.share !== "function") {
@@ -66,6 +85,7 @@ const MemoShareImageDialog = ({ open, onOpenChange }: MemoShareImageDialogProps)
       const blob = await createShareBlob();
       const file = new File([blob], buildMemoShareImageFileName(memo.name), { type: "image/png" });
       if (typeof navigator.canShare === "function" && !navigator.canShare({ files: [file] })) {
+        trackImageExport(memo, previewRenderWidth, "native_share", "unsupported");
         toast.error(t("memo.share.image-share-failed"));
         return;
       }
@@ -74,14 +94,17 @@ const MemoShareImageDialog = ({ open, onOpenChange }: MemoShareImageDialogProps)
         files: [file],
         title: memo.content.slice(0, 60),
       });
+      trackImageExport(memo, previewRenderWidth, "native_share", "success");
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
+      const cancelled = error instanceof DOMException && error.name === "AbortError";
+      trackImageExport(memo, previewRenderWidth, "native_share", cancelled ? "cancelled" : "failed");
+      if (!cancelled) {
         toast.error(t("memo.share.image-share-failed"));
       }
     } finally {
       setIsRendering(false);
     }
-  }, [createShareBlob, memo.content, memo.name, t]);
+  }, [createShareBlob, memo, previewRenderWidth, t]);
 
   const supportsNativeShare =
     typeof navigator !== "undefined" && typeof navigator.share === "function" && typeof navigator.canShare === "function";

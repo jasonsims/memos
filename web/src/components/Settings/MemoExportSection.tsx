@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import useCurrentUser from "@/hooks/useCurrentUser";
-import { getErrorMessage } from "@/lib/error";
+import { getErrorMessage, getErrorTrackProperties } from "@/lib/error";
 import { exportMemos, importStagedMemos, type StagedMemoImport, stageMemoImport } from "@/lib/memo-export";
+import { toPendoText, trackPendoEvent } from "@/lib/pendo";
 import type { ImportMemosIssue, ImportMemosReport } from "@/types/proto/api/user_service_pb";
 import { ImportMemosRequest_ConflictPolicy } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -66,7 +67,13 @@ const MemoExportSection = () => {
     if (!user) return;
     setExporting(true);
     try {
-      await exportMemos(user.name, user.username);
+      const startedAt = performance.now();
+      const exported = await exportMemos(user.name, user.username);
+      trackPendoEvent("memos_exported", () => ({
+        export_size_bytes: exported.size,
+        content_type: exported.contentType,
+        duration_ms: Math.round(performance.now() - startedAt),
+      }));
       toast.success(t("setting.memo-export.export-success"));
     } catch (error) {
       toast.error(getErrorMessage(error, t("setting.memo-export.export-failed")));
@@ -83,7 +90,26 @@ const MemoExportSection = () => {
     try {
       const staged = await stageMemoImport(user.name, file);
       setStage({ kind: "review", file, staged, policy: ImportMemosRequest_ConflictPolicy.SKIP });
+      // Counts from the server's plan; never the file name or the exporter's username.
+      trackPendoEvent("memo_import_staged", () => {
+        const { plan } = staged;
+        return {
+          file_size_bytes: file.size,
+          memo_count: plan.memoCount,
+          attachment_count: plan.attachmentCount,
+          new_count: plan.new,
+          existing_count: plan.existing,
+          renamed_count: plan.renamed,
+          warning_count: plan.warnings.length,
+          generator: toPendoText(plan.generator, 50),
+          is_own_export: plan.exporter === user.username,
+        };
+      });
     } catch (error) {
+      trackPendoEvent("memo_import_failed", () => {
+        const { error_code, error_message } = getErrorTrackProperties(error);
+        return { stage: "staging", error_code, error_message, upload_expired: false, file_size_bytes: file.size };
+      });
       toast.error(getErrorMessage(error, t("setting.memo-export.import-failed")));
     } finally {
       setBusy(false);
@@ -96,10 +122,25 @@ const MemoExportSection = () => {
     try {
       const report = await importStagedMemos(user.name, stage.staged, stage.policy);
       setStage({ kind: "done", report });
+      trackPendoEvent("memos_imported", () => ({
+        conflict_policy: ImportMemosRequest_ConflictPolicy[stage.policy],
+        memo_count: stage.staged.plan.memoCount,
+        attachment_count: stage.staged.plan.attachmentCount,
+        created: report.created,
+        updated: report.updated,
+        skipped: report.skipped,
+        failed: report.failed,
+        warning_count: report.warnings.length,
+      }));
       toast.success(t("setting.memo-export.import-success", { created: report.created, updated: report.updated }));
     } catch (error) {
+      const uploadExpired = ConnectError.from(error).code === Code.NotFound;
+      trackPendoEvent("memo_import_failed", () => {
+        const { error_code, error_message } = getErrorTrackProperties(error);
+        return { stage: "importing", error_code, error_message, upload_expired: uploadExpired, file_size_bytes: stage.file.size };
+      });
       toast.error(getErrorMessage(error, t("setting.memo-export.import-failed")));
-      if (ConnectError.from(error).code === Code.NotFound) {
+      if (uploadExpired) {
         // The staged upload expired; start over from the file picker.
         setStage({ kind: "idle" });
       }

@@ -2,6 +2,8 @@ import { uniqBy } from "lodash-es";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "react-hot-toast";
 import { v4 as uuidv4 } from "uuid";
+import { getErrorTrackProperties } from "@/lib/error";
+import { toPendoText, trackPendoEvent } from "@/lib/pendo";
 import type { Attachment } from "@/types/proto/api/attachment_service_pb";
 import { isImage } from "@/utils/attachment";
 import { useTranslate } from "@/utils/i18n";
@@ -172,7 +174,7 @@ export const useInlineImageUpload = (editorRef: RefObject<EditorController | nul
       for (const entry of job.entries) {
         if (entry.attachment) continue;
         try {
-          entry.attachment = await uploadService.uploadFile(entry.localFile);
+          entry.attachment = await uploadService.uploadFile(entry.localFile, undefined, "inline_image");
           if (disposedRef.current) return;
           appendAttachment(entry.attachment, entry.localFile.previewUrl);
           editorRef.current?.updateUploadAnchor(descriptorFor(job, "uploading"));
@@ -187,7 +189,21 @@ export const useInlineImageUpload = (editorRef: RefObject<EditorController | nul
 
       if (job.entries.some((entry) => !entry.attachment)) {
         editorRef.current?.updateUploadAnchor(descriptorFor(job, "failed"));
-        toast.error(errorService.getErrorMessage(lastError) || t("editor.insert-menu.image-upload-failed"));
+        trackPendoEvent("attachment_upload_failed", () => {
+          const failed = job.entries.find((entry) => !entry.attachment)?.localFile.file;
+          const { error_reason, quota_metric, error_message } = getErrorTrackProperties(lastError);
+          return {
+            upload_path: "inline_image",
+            mime_type: toPendoText(failed?.type, 50),
+            file_size_bytes: failed?.size,
+            completed_count: job.entries.filter((entry) => entry.attachment).length,
+            total_count: job.entries.length,
+            error_reason,
+            quota_metric,
+            error_message,
+          };
+        });
+        toast.error(errorService.getErrorMessage(lastError, "Upload inline image") || t("editor.insert-menu.image-upload-failed"));
         return;
       }
 

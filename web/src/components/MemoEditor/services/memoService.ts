@@ -95,7 +95,7 @@ export const memoService = {
       /** Runs as each local file finishes uploading, before the memo is saved. */
       onFileUploaded?: (localFile: LocalFile, attachment: Attachment) => void;
     },
-  ): Promise<{ memoName: string; hasChanges: boolean; moved?: boolean }> {
+  ): Promise<{ memoName: string; hasChanges: boolean; moved?: boolean; updateMask?: string[] }> {
     // 1. Upload local files first
     const newAttachments = await uploadService.uploadFiles(state.localFiles, options.onFileUploaded);
     const allAttachments = [...state.metadata.attachments, ...newAttachments];
@@ -109,11 +109,12 @@ export const memoService = {
         return { memoName: prevMemo.name, hasChanges: false };
       }
 
+      const updateMask = Array.from(mask);
       const memo = await memoServiceClient.updateMemo({
         memo: create(MemoSchema, patch as Record<string, unknown>),
-        updateMask: create(FieldMaskSchema, { paths: Array.from(mask) }),
+        updateMask: create(FieldMaskSchema, { paths: updateMask }),
       });
-      return { memoName: memo.name, hasChanges: true, moved: mask.has("space") };
+      return { memoName: memo.name, hasChanges: true, moved: mask.has("space"), updateMask };
     }
 
     // 3. Create new memo or comment

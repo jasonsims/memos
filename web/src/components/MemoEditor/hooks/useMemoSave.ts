@@ -1,20 +1,33 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { type RefObject, useCallback } from "react";
 import { toast } from "react-hot-toast";
 import { useNewMemo } from "@/contexts/NewMemoContext";
 import { attachmentKeys } from "@/hooks/useAttachmentQueries";
 import { memoKeys } from "@/hooks/useMemoQueries";
 import { userKeys } from "@/hooks/useUserQueries";
-import { handleError } from "@/lib/error";
+import { getErrorTrackProperties, handleError } from "@/lib/error";
+import { getComposerSource, type PendoTrackProperties, trackPendoEvent } from "@/lib/pendo";
 import type { Attachment } from "@/types/proto/api/attachment_service_pb";
-import type { Visibility } from "@/types/proto/api/memo_service_pb";
+import { Visibility } from "@/types/proto/api/memo_service_pb";
 import { useTranslate } from "@/utils/i18n";
+import { extractMentionUsernames } from "@/utils/mention-extraction";
 import { errorService, memoService, validationService } from "../services";
-import { useEditorContext } from "../state";
+import { type EditorState, useEditorContext } from "../state";
+import type { EditorController } from "../types/editorController";
 import { restampDefaultCreateTime } from "../utils/deriveDefaultCreateTime";
 
 /** How long a closing host shows "Saved" before it unmounts the editor. */
 const SAVED_CONFIRMATION_MS = 900;
+
+/** What a save sent, for track events: sizes and counts only, never the content. */
+const getSavedContentProperties = (state: EditorState, uploadedCount: number): PendoTrackProperties => ({
+  visibility: Visibility[state.metadata.visibility],
+  content_length: state.content.length,
+  attachment_count: state.metadata.attachments.length + uploadedCount,
+  uploaded_file_count: uploadedCount,
+  relation_count: state.metadata.relations.length,
+  has_location: Boolean(state.metadata.location),
+});
 
 interface UseMemoSaveOptions {
   memoName?: string;
@@ -22,6 +35,10 @@ interface UseMemoSaveOptions {
   defaultSpace?: string;
   defaultVisibility?: Visibility;
   defaultCreateTime?: Date;
+  /** The editor's draft cache key, which names the composer in track events. */
+  cacheKey?: string;
+  /** Reads the saved document's tags and checklist for track events. */
+  editorRef?: RefObject<EditorController | null>;
   discardDraft: () => void;
   onConfirm?: (memoName: string) => void;
   onCancel?: () => void;
@@ -38,6 +55,8 @@ export function useMemoSave({
   defaultSpace,
   defaultVisibility,
   defaultCreateTime,
+  cacheKey,
+  editorRef,
   discardDraft,
   onConfirm,
   onCancel,
@@ -104,6 +123,35 @@ export function useMemoSave({
         return;
       }
 
+      // Sent before the editor resets, while it still holds the saved document.
+      if (memoName) {
+        trackPendoEvent("memo_updated", () => ({
+          ...getSavedContentProperties(state, uploaded.size),
+          changed_fields: result.updateMask,
+          moved_space: Boolean(result.moved),
+          is_comment: Boolean(parentMemoName),
+          composer_source: getComposerSource(cacheKey),
+        }));
+      } else if (parentMemoName) {
+        trackPendoEvent("memo_comment_created", () => ({
+          ...getSavedContentProperties(state, uploaded.size),
+          parent_memo_name: parentMemoName,
+          mention_count: extractMentionUsernames(state.content).length,
+        }));
+      } else {
+        trackPendoEvent("memo_created", () => ({
+          ...getSavedContentProperties(state, uploaded.size),
+          composer_source: getComposerSource(cacheKey),
+          has_space: Boolean(defaultSpace ?? state.metadata.space),
+          has_custom_create_time: Boolean(timestamps.createTime),
+          tag_count: editorRef?.current?.getTags().length,
+          mention_count: extractMentionUsernames(state.content).length,
+          has_checklist: editorRef?.current?.hasChecklist(),
+          accepted_suggestion_count: state.acceptedSuggestionIds.length,
+          is_focus_mode: state.ui.isFocusMode,
+        }));
+      }
+
       // Prevent the autosave unmount flush from restoring the saved draft.
       discardDraft();
       // A moved memo may leave the feed it was edited in; say where it went.
@@ -151,6 +199,19 @@ export function useMemoSave({
       onConfirm?.(result.memoName);
     } catch (error) {
       keepUploadedFiles();
+      trackPendoEvent("memo_save_failed", () => {
+        const { error_reason, error_code, quota_metric } = getErrorTrackProperties(error);
+        return {
+          operation: memoName ? "update" : parentMemoName ? "comment" : "create",
+          error_reason,
+          quota_metric,
+          error_code,
+          uploaded_file_count: uploaded.size,
+          pending_local_file_count: state.localFiles.length - uploaded.size,
+          content_length: state.content.length,
+          composer_source: getComposerSource(cacheKey),
+        };
+      });
       if (uploaded.size > 0) {
         // The uploads landed even though the save did not.
         void queryClient.invalidateQueries({ queryKey: attachmentKeys.lists() });
@@ -166,11 +227,13 @@ export function useMemoSave({
     }
   }, [
     actions,
+    cacheKey,
     defaultCreateTime,
     defaultSpace,
     defaultVisibility,
     discardDraft,
     dispatch,
+    editorRef,
     getState,
     markNewMemo,
     memoName,

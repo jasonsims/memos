@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useInstance } from "@/contexts/InstanceContext";
+import { trackPendoEvent } from "@/lib/pendo";
 import {
   InstanceSetting_AIProviderConfig,
   InstanceSetting_AIProviderConfigSchema,
@@ -188,6 +189,14 @@ const AISection = () => {
 
     const ok = await persistAISetting(nextProviders, originalSetting.transcription, "Update AI provider");
     if (!ok) return;
+    // Never the API key or its hint.
+    trackPendoEvent("ai_provider_configured", () => ({
+      action: exists ? "updated" : "created",
+      provider_type: getProviderTypeLabel(normalizedProvider.type),
+      uses_custom_endpoint: Boolean(endpoint),
+      api_key_changed: Boolean(normalizedProvider.apiKey.trim()),
+      provider_count: nextProviders.length,
+    }));
     setProviders(nextProviders);
     setEditingProvider(undefined);
   };
@@ -208,6 +217,13 @@ const AISection = () => {
 
     const ok = await persistAISetting(nextProviders, nextTranscription, "Delete AI provider");
     if (!ok) return;
+    trackPendoEvent("ai_provider_configured", () => ({
+      action: "deleted",
+      provider_type: getProviderTypeLabel(target.type),
+      uses_custom_endpoint: Boolean(target.endpoint),
+      provider_count: nextProviders.length,
+      cleared_transcription: nextTranscription !== persistedTranscription,
+    }));
     setProviders(nextProviders);
     if (transcription.providerId === target.id) {
       setTranscription((prev) => ({ ...prev, providerId: "" }));
@@ -220,7 +236,17 @@ const AISection = () => {
       toast.error(t("setting.ai.transcription-empty-providers"));
       return;
     }
-    await persistAISetting(providers, toTranscriptionConfig(transcription), "Update transcription");
+    const ok = await persistAISetting(providers, toTranscriptionConfig(transcription), "Update transcription");
+    if (!ok) return;
+    // Whether a model, language or prompt is set, never their text.
+    trackPendoEvent("ai_transcription_configured", () => ({
+      enabled: Boolean(transcription.providerId),
+      provider_type: transcriptionProviderRef ? getProviderTypeLabel(transcriptionProviderRef.type) : undefined,
+      provider_has_api_key: Boolean(transcriptionProviderRef?.apiKeySet),
+      has_model: Boolean(transcription.model.trim()),
+      has_language: Boolean(transcription.language.trim()),
+      has_prompt: Boolean(transcription.prompt.trim()),
+    }));
   };
 
   return (

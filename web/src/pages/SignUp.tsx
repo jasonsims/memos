@@ -17,6 +17,7 @@ import { useIdentityProviderList } from "@/hooks/useIdentityProviderQueries";
 import useLoading from "@/hooks/useLoading";
 import useNavigateTo from "@/hooks/useNavigateTo";
 import { ERROR_REASON_CHALLENGE_REQUIRED, handleError, hasErrorReason } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { ROUTES } from "@/router/routes";
 import { User_Role, UserSchema } from "@/types/proto/api/user_service_pb";
 import { AUTH_REDIRECT_PARAM, appendSearchParams, getSafeRedirectPath } from "@/utils/auth-redirect";
@@ -84,6 +85,15 @@ const SignUp = () => {
       }
       // Refresh auth context to load the current user
       await initAuth();
+      // Sent after initAuth identified the new visitor, so the conversion is not credited to the anonymous one.
+      trackPendoEvent("user_signed_up", () => ({
+        is_first_run_setup: needsSetup,
+        user_role: response.user ? User_Role[response.user.role] : undefined,
+        auth_method: "password",
+        challenge_completed: Boolean(challengeToken),
+        challenge_provider: profile.challenge?.provider || undefined,
+        has_redirect_target: Boolean(redirectTarget),
+      }));
       // Refetch instance profile to update the initialized status
       await initInstance();
       navigateTo(redirectTarget || ROUTES.HOME, { replace: true });

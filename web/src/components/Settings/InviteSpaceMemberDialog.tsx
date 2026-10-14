@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCreateSpaceInvitation } from "@/hooks/useSpaceQueries";
 import { useUsersByUsernames } from "@/hooks/useUserQueries";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { extractSpaceUidFromName } from "@/lib/space-display";
 import { type Space, SpaceInvitationSchema, SpaceMember_Role } from "@/types/proto/api/space_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -90,6 +91,13 @@ const InviteSpaceMemberDialog = ({ open, onOpenChange, space, viewerName, member
           role,
         }),
       });
+      // Never the invitee, whose username is also the last segment of the invitation's name.
+      trackPendoEvent("space_invitation_sent", () => ({
+        space_name: space.name,
+        invitee_role: SpaceMember_Role[role],
+        member_count: memberUserNames.size,
+        pending_invitation_count: pendingInviteeNames.size + 1,
+      }));
       toast.success(t("setting.spaces.invite-success", { username: candidate.username }));
       onOpenChange(false);
     } catch (error) {

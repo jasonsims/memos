@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useUpdateMemo } from "@/hooks/useMemoQueries";
+import { getMemoTrackProperties, trackPendoEvent } from "@/lib/pendo";
 import { toggleTaskAtIndex } from "@/utils/markdown-manipulation";
 import { useMemoViewContext, useMemoViewDerived } from "../MemoView/MemoViewContext";
 import { TASK_LIST_ITEM_CLASS } from "./constants";
@@ -56,13 +57,24 @@ export const TaskListItem: React.FC<TaskListItemProps> = ({ checked, node: _node
 
     // Update memo content using the string manipulation utility
     const newContent = toggleTaskAtIndex(memo.content, taskIndex, newChecked);
-    updateMemo({
-      update: {
-        name: memo.name,
-        content: newContent,
+    updateMemo(
+      {
+        update: {
+          name: memo.name,
+          content: newContent,
+        },
+        updateMask: ["content", "update_time"],
       },
-      updateMask: ["content", "update_time"],
-    });
+      {
+        onSuccess: () =>
+          trackPendoEvent("memo_task_toggled", () => ({
+            ...getMemoTrackProperties(memo),
+            checked: newChecked,
+            task_index: taskIndex,
+            had_incomplete_tasks: memo.property?.hasIncompleteTasks,
+          })),
+      },
+    );
   };
 
   // Override the disabled prop from remark-gfm (which defaults to true).

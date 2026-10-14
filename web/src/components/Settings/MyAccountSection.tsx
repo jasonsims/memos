@@ -9,7 +9,9 @@ import useCurrentUser from "@/hooks/useCurrentUser";
 import { useDialog } from "@/hooks/useDialog";
 import useNavigateTo from "@/hooks/useNavigateTo";
 import { handleError } from "@/lib/error";
+import { daysSince, trackPendoEvent } from "@/lib/pendo";
 import { ROUTES } from "@/router/routes";
+import { User_Role } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
 import ChangeMemberPasswordDialog from "../ChangeMemberPasswordDialog";
 import UpdateAccountDialog from "../UpdateAccountDialog";
@@ -35,6 +37,8 @@ const MyAccountSection = () => {
     }
     try {
       await userServiceClient.deleteUser({ name: user.name });
+      // Before logout(): it clears the Pendo session, which would credit the event to a new anonymous visitor.
+      trackPendoEvent("account_deleted", () => ({ account_age_days: daysSince(user.createTime), user_role: User_Role[user.role] }));
       await logout();
       toast.success(t("setting.member.delete-success", { username: user.username }));
       navigateTo(ROUTES.AUTH, { replace: true });

@@ -4,6 +4,8 @@ import { toast } from "react-hot-toast";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { handleError } from "@/lib/error";
+import { toPendoText, trackPendoEvent } from "@/lib/pendo";
+import { ROUTES } from "@/router/routes";
 import { IdentityProvider } from "@/types/proto/api/idp_service_pb";
 import { AUTH_AUTO_SIGN_IN_PARAM } from "@/utils/auth-redirect";
 import { useTranslate } from "@/utils/i18n";
@@ -23,7 +25,7 @@ const IdentityProviderButtons = ({ identityProviderList, redirectTarget, autoSig
   const automaticAttemptedRef = useRef(false);
 
   const handleSignInWithIdentityProvider = useCallback(
-    async (identityProvider: IdentityProvider) => {
+    async (identityProvider: IdentityProvider, isAutomatic = false) => {
       if (pendingRef.current) return;
       pendingRef.current = true;
       setPendingProvider(identityProvider);
@@ -37,6 +39,15 @@ const IdentityProviderButtons = ({ identityProviderList, redirectTarget, autoSig
           },
           { replace: true },
         );
+        // The automatic redirect is not a click, so only this event shows it.
+        trackPendoEvent("sso_sign_in_initiated", () => ({
+          identity_provider: identityProvider.name,
+          identity_provider_title: toPendoText(identityProvider.title, 50),
+          is_automatic: isAutomatic,
+          provider_count: identityProviderList.length,
+          page: window.location.pathname.startsWith(ROUTES.AUTH_SIGNUP) ? "signup" : "signin",
+          has_redirect_target: Boolean(redirectTarget),
+        }));
         await signInWithSSO(identityProvider, redirectTarget);
       } catch (error) {
         pendingRef.current = false;
@@ -47,7 +58,7 @@ const IdentityProviderButtons = ({ identityProviderList, redirectTarget, autoSig
         });
       }
     },
-    [redirectTarget, setSearchParams],
+    [identityProviderList.length, redirectTarget, setSearchParams],
   );
 
   useEffect(() => {
@@ -63,7 +74,7 @@ const IdentityProviderButtons = ({ identityProviderList, redirectTarget, autoSig
       return;
     }
     automaticAttemptedRef.current = true;
-    void handleSignInWithIdentityProvider(provider);
+    void handleSignInWithIdentityProvider(provider, true);
   }, [autoSignIn, identityProviderList, searchParams, handleSignInWithIdentityProvider]);
 
   useEffect(() => {

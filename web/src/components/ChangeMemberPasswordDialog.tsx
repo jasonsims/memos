@@ -4,9 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import useCurrentUser from "@/hooks/useCurrentUser";
 import { useUpdateUser } from "@/hooks/useUserQueries";
 import { handleError } from "@/lib/error";
-import { User } from "@/types/proto/api/user_service_pb";
+import { daysSince, trackPendoEvent } from "@/lib/pendo";
+import { User, User_Role } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
 
 interface Props {
@@ -18,6 +20,7 @@ interface Props {
 
 function ChangeMemberPasswordDialog({ open, onOpenChange, user, onSuccess }: Props) {
   const t = useTranslate();
+  const currentUser = useCurrentUser();
   const { mutateAsync: updateUser } = useUpdateUser();
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordAgain, setNewPasswordAgain] = useState("");
@@ -58,6 +61,10 @@ function ChangeMemberPasswordDialog({ open, onOpenChange, user, onSuccess }: Pro
         },
         updateMask: ["password"],
       });
+      // Only the signed-in user's own change; an admin resetting a member is member_account_updated.
+      if (user.name === currentUser?.name) {
+        trackPendoEvent("password_changed", () => ({ user_role: User_Role[user.role], account_age_days: daysSince(user.createTime) }));
+      }
       toast(t("message.password-changed"));
       onSuccess?.();
       onOpenChange(false);

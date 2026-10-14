@@ -3,7 +3,9 @@ import { ListTodoIcon, ZapIcon } from "lucide-react";
 import { type RefObject, useId, useLayoutEffect, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { MAX_MEMO_SUGGESTIONS, type MemoSuggestion, type SuggestionItem } from "@/lib/memo-suggestions";
+import { trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
+import { Visibility } from "@/types/proto/api/memo_service_pb";
 import { useTranslate } from "@/utils/i18n";
 import { getAssignableVisibilityOptions, getVisibilityOption } from "@/utils/memo";
 import { useEditorContext, useEditorSelector } from "../state";
@@ -135,7 +137,17 @@ export function EditorSuggestions({
         applied = true;
         break;
     }
-    if (applied) dispatch(actions.acceptSuggestion(suggestion.id));
+    if (applied) {
+      // Kind and context only: a tag suggestion's tag (and id) would expose the user's tag names.
+      trackPendoEvent("memo_suggestion_accepted", () => ({
+        suggestion_kind: suggestion.kind,
+        suggestion_source: suggestion.source,
+        suggested_visibility: suggestion.kind === "visibility" ? Visibility[suggestion.visibility] : undefined,
+        visible_suggestion_count: visible.length,
+        has_space: Boolean(space),
+      }));
+      dispatch(actions.acceptSuggestion(suggestion.id));
+    }
   };
 
   return <SuggestionsBar suggestions={visible} disabled={isSaving} onAccept={accept} />;

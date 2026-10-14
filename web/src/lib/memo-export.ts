@@ -7,14 +7,16 @@ import { ImportMemosRequest_ConflictPolicy, ImportMemosSpecSchema } from "@/type
 
 const DEFAULT_CHUNK_SIZE = 2 * 1024 * 1024;
 
-// exportMemos downloads the user's Memos export file.
-export async function exportMemos(userName: string, username: string): Promise<void> {
+// exportMemos downloads the user's Memos export file and returns its size and media type.
+export async function exportMemos(userName: string, username: string): Promise<{ size: number; contentType: string }> {
   const body = await userServiceClient.exportMemos({ name: userName });
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-  const url = URL.createObjectURL(new Blob([body.data as BlobPart], { type: body.contentType }));
+  const blob = new Blob([body.data as BlobPart], { type: body.contentType });
+  const url = URL.createObjectURL(blob);
   downloadFileFromUrl(url, `memos-export-${username}-${stamp}.zip`);
   // Give the browser a tick to start the download before revoking.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { size: blob.size, contentType: body.contentType };
 }
 
 export interface StagedMemoImport {

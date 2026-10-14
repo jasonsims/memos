@@ -21,7 +21,7 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { useLocation, useNavigate } from "react-router-dom";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -38,8 +38,9 @@ import { useMemoFilterContext } from "@/contexts/MemoFilterContext";
 import useCurrentUser from "@/hooks/useCurrentUser";
 import useLoading from "@/hooks/useLoading";
 import { useMemoViews, userKeys } from "@/hooks/useUserQueries";
-import { handleError } from "@/lib/error";
+import { getErrorTrackProperties, handleError } from "@/lib/error";
 import { getMemoViewId } from "@/lib/memo-views";
+import { trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
 import { MemoView, MemoView_IconSchema, MemoViewSchema } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -277,8 +278,25 @@ const MemoViews = () => {
   const createState = useLoading(false);
   const validateState = useLoading(false);
   const updateState = useLoading(false);
+  // The last filter expression that validated, so a save can report whether it was checked first.
+  const validatedFilterRef = useRef<string | undefined>(undefined);
   const isEditing = draft.name !== "";
   const isSaving = createState.isLoading || updateState.isLoading;
+
+  /** Reports a saved view: its shape and whether it began as a built-in example, never the filter itself. */
+  const trackViewSaved = (action: "created" | "updated") =>
+    trackPendoEvent("memo_view_saved", () => {
+      const example = memoViewExamples.find((item) => item.filter === draft.filter);
+      return {
+        action,
+        filter_length: draft.filter.length,
+        has_icon: Boolean(draft.icon),
+        from_example: Boolean(example),
+        example_title: example?.title,
+        validated_before_save: validatedFilterRef.current === draft.filter,
+        view_count: memoViews.length + (action === "created" ? 1 : 0),
+      };
+    });
 
   useEffect(() => {
     const state = location.state as MemoViewsRouteState | null;
@@ -357,10 +375,16 @@ const MemoViews = () => {
         memoView: { name: "", title: draft.title, filter: draft.filter, icon: draft.icon },
         validateOnly: true,
       });
+      validatedFilterRef.current = draft.filter;
+      trackPendoEvent("memo_view_filter_validated", () => ({ is_valid: true, filter_length: draft.filter.length, is_editing: isEditing }));
       validateState.setFinish();
       toast.success("Filter expression looks valid");
       return true;
     } catch (error: unknown) {
+      trackPendoEvent("memo_view_filter_validated", () => {
+        const { error_code, error_message } = getErrorTrackProperties(error);
+        return { is_valid: false, filter_length: draft.filter.length, is_editing: isEditing, error_code, error_message };
+      });
       await handleError(error, toast.error, {
         context: "Validate memo view filter",
         onError: () => validateState.setError(),
@@ -385,6 +409,7 @@ const MemoViews = () => {
         parent: user.name,
         memoView: { name: "", title: draft.title, filter: draft.filter, icon: draft.icon },
       });
+      trackViewSaved("created");
       await queryClient.invalidateQueries({ queryKey: userKeys.memoViews(user.name) });
       createState.setFinish();
       setDraft(createEmptyMemoView());
@@ -410,6 +435,7 @@ const MemoViews = () => {
         memoView: draft,
         updateMask: create(FieldMaskSchema, { paths: ["title", "filter", "icon"] }),
       });
+      trackViewSaved("updated");
       await queryClient.invalidateQueries({ queryKey: userKeys.memoViews(user?.name) });
       updateState.setFinish();
       setDraft(createEmptyMemoView());
@@ -437,6 +463,12 @@ const MemoViews = () => {
 
     try {
       await userServiceClient.deleteMemoView({ name: deleteTarget.name });
+      trackPendoEvent("memo_view_deleted", () => ({
+        view_id: getMemoViewId(deleteTarget.name),
+        was_active: selectedMemoView === getMemoViewId(deleteTarget.name),
+        source: "views_page",
+        remaining_view_count: memoViews.length - 1,
+      }));
       await queryClient.invalidateQueries({ queryKey: userKeys.memoViews(user?.name) });
       if (selectedMemoView === getMemoViewId(deleteTarget.name)) setMemoView(undefined);
       toast.success(t("setting.memo-view.delete-success", { title: deleteTarget.title }));

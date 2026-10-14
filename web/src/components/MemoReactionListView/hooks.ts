@@ -4,6 +4,7 @@ import { useResolvedUsersByNames } from "@/components/MemoContent/MentionResolut
 import { memoServiceClient } from "@/connect";
 import useCurrentUser from "@/hooks/useCurrentUser";
 import { memoKeys } from "@/hooks/useMemoQueries";
+import { trackPendoEvent } from "@/lib/pendo";
 import type { Memo, Reaction } from "@/types/proto/api/memo_service_pb";
 import type { User } from "@/types/proto/api/user_service_pb";
 
@@ -30,9 +31,11 @@ export const useReactionGroups = (reactions: Reaction[]): ReactionGroup => {
 interface UseReactionActionsOptions {
   memo: Memo;
   onComplete?: () => void;
+  /** The control reacting: the emoji picker or an existing reaction pill. Reported with the track event. */
+  entryPoint?: "picker" | "pill";
 }
 
-export const useReactionActions = ({ memo, onComplete }: UseReactionActionsOptions) => {
+export const useReactionActions = ({ memo, onComplete, entryPoint }: UseReactionActionsOptions) => {
   const currentUser = useCurrentUser();
   const queryClient = useQueryClient();
 
@@ -44,7 +47,8 @@ export const useReactionActions = ({ memo, onComplete }: UseReactionActionsOptio
     if (!currentUser) return;
 
     try {
-      if (hasReacted(reactionType)) {
+      const removing = hasReacted(reactionType);
+      if (removing) {
         const reactions = memo.reactions.filter(
           (reaction) => reaction.reactionType === reactionType && reaction.creator === currentUser.name,
         );
@@ -55,6 +59,14 @@ export const useReactionActions = ({ memo, onComplete }: UseReactionActionsOptio
           reaction: { reactionType },
         });
       }
+      trackPendoEvent("memo_reaction_toggled", () => ({
+        reaction_type: reactionType,
+        action: removing ? "removed" : "added",
+        is_comment: Boolean(memo.parent),
+        is_own_memo: memo.creator === currentUser.name,
+        reaction_count: memo.reactions.length,
+        entry_point: entryPoint,
+      }));
       // Refetch the memo to get updated reactions and invalidate cache
       const updatedMemo = await memoServiceClient.getMemo({ name: memo.name });
       queryClient.setQueryData(memoKeys.detail(memo.name), updatedMemo);

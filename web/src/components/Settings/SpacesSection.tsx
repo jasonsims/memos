@@ -44,6 +44,7 @@ import {
 import { useUsersByUsernames } from "@/hooks/useUserQueries";
 import { customIconsEqual } from "@/lib/custom-icons";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { extractUsernameFromName } from "@/lib/resource-names";
 import { extractSpaceUidFromName } from "@/lib/space-display";
 import { ROUTES } from "@/router/routes";
@@ -106,8 +107,8 @@ const SpacesSection = () => {
   const receivedInvitations = receivedInvitationsQuery.data ?? [];
   const managedSpace = spaces.find((space) => space.name === managedSpaceName);
   const [createOpen, setCreateOpen] = useState(false);
-  const acceptInvitation = useAcceptSpaceInvitation(viewerName);
-  const declineInvitation = useDeclineSpaceInvitation(viewerName);
+  const acceptInvitation = useAcceptSpaceInvitation(viewerName, "settings");
+  const declineInvitation = useDeclineSpaceInvitation(viewerName, "settings");
 
   useEffect(() => {
     if (managedSpaceName && spacesQuery.isSuccess && !managedSpace) {
@@ -317,6 +318,7 @@ const SpacesSection = () => {
         onOpenChange={setCreateOpen}
         onCreated={(space) => navigate(getSpacesSettingsLocation(space.name))}
         note={t("setting.spaces.create-scope-note")}
+        entryPoint="settings"
       />
     </>
   );
@@ -399,6 +401,13 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
     if (member.role === role || updateMember.isPending) return;
     try {
       await updateMember.mutateAsync({ spaceMember: { name: member.name, role }, updateMask: ["role"] });
+      trackPendoEvent("space_member_role_changed", () => ({
+        space_name: space.name,
+        previous_role: SpaceMember_Role[member.role],
+        new_role: SpaceMember_Role[role],
+        // Admins after the change.
+        admin_count: activeAdminCount + (role === SpaceMember_Role.ADMIN ? 1 : 0) - (member.role === SpaceMember_Role.ADMIN ? 1 : 0),
+      }));
       toast.success(t("setting.spaces.role-update-success"));
     } catch (error) {
       handleError(error, toast.error, { context: "Update space member" });
@@ -409,6 +418,11 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
     if (!removeTarget) return;
     try {
       await deleteMember.mutateAsync({ name: removeTarget.name });
+      trackPendoEvent("space_member_removed", () => ({
+        space_name: space.name,
+        removed_member_role: SpaceMember_Role[removeTarget.role],
+        member_count_after: members.length - 1,
+      }));
       toast.success(t("setting.spaces.remove-success", { username: extractUsernameFromName(removeTarget.user) }));
       setRemoveTarget(undefined);
     } catch (error) {
@@ -433,6 +447,12 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
     if (!currentMember) return;
     try {
       await deleteMember.mutateAsync({ name: currentMember.name });
+      trackPendoEvent("space_left", () => ({
+        space_name: space.name,
+        role: SpaceMember_Role[currentMember.role],
+        // Members who remain.
+        member_count: members.length - 1,
+      }));
       toast.success(t("setting.spaces.leave-success", { space: disambiguatedSpaceTitle }));
       onBack();
     } catch (error) {
@@ -444,6 +464,11 @@ const SpaceDetail = ({ space, viewerName, onBack }: SpaceDetailProps) => {
   const handleDeleteSpace = async () => {
     try {
       await deleteSpace.mutateAsync({ name: space.name });
+      trackPendoEvent("space_deleted", () => ({
+        space_name: space.name,
+        member_count: members.length || space.memberCount,
+        pending_invitation_count: invitations.length,
+      }));
       toast.success(t("setting.spaces.delete-success", { space: disambiguatedSpaceTitle }));
       onBack();
     } catch (error) {

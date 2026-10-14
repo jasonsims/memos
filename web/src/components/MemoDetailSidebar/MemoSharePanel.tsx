@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getShareUrl, useCreateMemoShare, useDeleteMemoShare, useMemoShares } from "@/hooks/useMemoShareQueries";
+import { daysSince, trackPendoEvent } from "@/lib/pendo";
 import type { MemoShare } from "@/types/proto/api/memo_service_pb";
 import { useTranslate } from "@/utils/i18n";
 
@@ -47,6 +48,13 @@ function ShareLinkRow({ share, memoName }: ShareLinkRowProps) {
   const handleRevoke = async () => {
     try {
       await deleteShare.mutateAsync({ name: share.name, memoName });
+      // Never share.name or the URL: their last segment is the bearer token.
+      trackPendoEvent("memo_share_link_revoked", () => ({
+        memo_name: memoName,
+        had_expiry: Boolean(share.expireTime),
+        was_expired: share.expireTime ? timestampDate(share.expireTime).getTime() < Date.now() : false,
+        link_age_days: daysSince(share.createTime),
+      }));
       toast.success(t("memo.share.revoked"));
     } catch (e) {
       toast.error((e as ConnectError).message || t("memo.share.revoke-failed"));
@@ -103,6 +111,13 @@ const MemoSharePanel = ({ open, onClose, memoName }: MemoSharePanelProps) => {
   const handleCreate = async () => {
     try {
       await createShare.mutateAsync({ memoName, expireTime: getExpireDate(expiry) });
+      // Never the new share's name or URL: their last segment is the bearer token.
+      trackPendoEvent("memo_share_link_created", () => ({
+        memo_name: memoName,
+        expiry_option: expiry,
+        expires_in_days: expiry === "never" ? undefined : Number.parseInt(expiry, 10),
+        active_link_count: shares.length + 1,
+      }));
     } catch (e) {
       toast.error((e as ConnectError).message || t("memo.share.create-failed"));
     }

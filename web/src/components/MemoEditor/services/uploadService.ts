@@ -1,16 +1,20 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { attachmentServiceClient } from "@/connect";
+import { toPendoText, trackPendoEvent } from "@/lib/pendo";
 import type { Attachment, UploadAttachmentRequest } from "@/types/proto/api/attachment_service_pb";
 import { AttachmentSchema, MotionMediaSchema, UploadAttachmentSpecSchema } from "@/types/proto/api/attachment_service_pb";
-import type { LocalFile } from "../types/attachment";
+import { categorizeFile, type LocalFile } from "../types/attachment";
 
 const DEFAULT_CHUNK_SIZE = 2 * 1024 * 1024;
 // The server allows eight unfinished uploads per user; stay well under it.
 const MAX_CONCURRENT_UPLOADS = 4;
 
+/** How a file reached the server: with a memo being saved, or inserted inline as soon as it was picked. */
+export type AttachmentUploadPath = "memo_save" | "inline_image";
+
 export const uploadService = {
-  async uploadFile(localFile: LocalFile, signal?: AbortSignal): Promise<Attachment> {
+  async uploadFile(localFile: LocalFile, signal?: AbortSignal, uploadPath?: AttachmentUploadPath): Promise<Attachment> {
     const { file, motionMedia } = localFile;
     const mediaMetadata = await localFile.mediaMetadata;
     const spec = create(UploadAttachmentSpecSchema, {
@@ -54,6 +58,17 @@ export const uploadService = {
       }
       if (request.finishWrite) {
         if (!response.attachment) throw new Error("Upload completed without an attachment");
+        // Never the filename.
+        trackPendoEvent("attachment_uploaded", () => ({
+          file_category: categorizeFile(file.type, motionMedia),
+          mime_type: toPendoText(file.type, 50),
+          file_size_bytes: file.size,
+          upload_origin: localFile.origin ?? "upload",
+          upload_path: uploadPath,
+          is_motion_media: Boolean(motionMedia),
+          has_media_metadata: Boolean(mediaMetadata),
+          chunk_count: Math.max(1, Math.ceil(file.size / chunkSize)),
+        }));
         return response.attachment;
       }
       offset = end;
@@ -70,7 +85,7 @@ export const uploadService = {
     let next = 0;
     const worker = async () => {
       for (let index = next++; index < localFiles.length; index = next++) {
-        attachments[index] = await this.uploadFile(localFiles[index]);
+        attachments[index] = await this.uploadFile(localFiles[index], undefined, "memo_save");
         onUploaded?.(localFiles[index], attachments[index]);
       }
     };

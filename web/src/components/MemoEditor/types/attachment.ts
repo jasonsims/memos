@@ -57,7 +57,7 @@ export const getAudioRecordingTimeLabel = (filename: string): string | undefined
   return undefined;
 };
 
-function categorizeFile(mimeType: string, motionMedia?: MotionMedia): FileCategory {
+export function categorizeFile(mimeType: string, motionMedia?: MotionMedia): FileCategory {
   if (motionMedia) return "motion";
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("video/")) return "video";

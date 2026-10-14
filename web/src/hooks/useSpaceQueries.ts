@@ -7,14 +7,17 @@ import { attachmentKeys } from "@/hooks/useAttachmentQueries";
 import { memoKeys } from "@/hooks/useMemoQueries";
 import { userKeys } from "@/hooks/useUserQueries";
 import { hasConnectCode } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import {
   type Space,
   type SpaceInvitation,
   SpaceInvitationSchema,
   type SpaceMember,
+  SpaceMember_Role,
   SpaceMemberSchema,
   SpaceSchema,
 } from "@/types/proto/api/space_service_pb";
+import type { UserNotification } from "@/types/proto/api/user_service_pb";
 
 const SPACE_LIST_PAGE_SIZE = 1000;
 const SPACE_LIST_STALE_TIME = 1000 * 60 * 5;
@@ -99,6 +102,20 @@ const invalidateMembershipSensitiveQueries = (queryClient: QueryClient) => {
   void queryClient.invalidateQueries({ queryKey: memoKeys.all });
   void queryClient.invalidateQueries({ queryKey: attachmentKeys.lists() });
   void queryClient.invalidateQueries({ queryKey: userKeys.stats() });
+};
+
+/** Where an invitation was answered, reported with the Pendo track events. */
+export type SpaceInvitationSource = "settings" | "inbox";
+
+/** The role a received invitation offers, from the list it was answered in: Settings > Spaces or the inbox. */
+const findReceivedInvitationRole = (queryClient: QueryClient, viewerName: string, name: string): SpaceMember_Role | undefined => {
+  const invitation = queryClient.getQueryData<SpaceInvitation[]>(spaceKeys.userInvitations(viewerName))?.find((item) => item.name === name);
+  if (invitation) return invitation.role;
+  for (const notification of queryClient.getQueryData<UserNotification[]>(userKeys.notifications()) ?? []) {
+    const payload = notification.payload;
+    if (payload?.case === "spaceInvitation" && payload.value.spaceInvitation === name) return payload.value.role;
+  }
+  return undefined;
 };
 
 export function useSpaces(viewerName: string | undefined, options?: SpaceQueryOptions) {
@@ -298,7 +315,7 @@ export function useDeleteSpaceInvitation(viewerName: string) {
   });
 }
 
-export function useAcceptSpaceInvitation(viewerName: string) {
+export function useAcceptSpaceInvitation(viewerName: string, source?: SpaceInvitationSource) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -306,6 +323,7 @@ export function useAcceptSpaceInvitation(viewerName: string) {
     onSuccess: (member, { name }) => {
       const userInvitationKey = spaceKeys.userInvitations(viewerName);
       const spaceName = spaceNameFromChildResource(member.name) ?? spaceNameFromChildResource(name);
+      trackPendoEvent("space_invitation_accepted", () => ({ space_name: spaceName, role: SpaceMember_Role[member.role], source }));
 
       updateCachedList<SpaceInvitation>(queryClient, userInvitationKey, (invitations) => removeByName(invitations, name));
       if (spaceName) {
@@ -325,7 +343,7 @@ export function useAcceptSpaceInvitation(viewerName: string) {
   });
 }
 
-export function useDeclineSpaceInvitation(viewerName: string) {
+export function useDeclineSpaceInvitation(viewerName: string, source?: SpaceInvitationSource) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -334,6 +352,11 @@ export function useDeclineSpaceInvitation(viewerName: string) {
       return name;
     },
     onSuccess: (name) => {
+      // Before the invitation leaves the cached lists that hold its role.
+      trackPendoEvent("space_invitation_declined", () => {
+        const role = findReceivedInvitationRole(queryClient, viewerName, name);
+        return { space_name: spaceNameFromChildResource(name), role: role === undefined ? undefined : SpaceMember_Role[role], source };
+      });
       updateCachedList<SpaceInvitation>(queryClient, spaceKeys.userInvitations(viewerName), (invitations) =>
         removeByName(invitations, name),
       );

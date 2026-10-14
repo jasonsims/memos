@@ -27,6 +27,7 @@ const ReactionSelector = ({ memo, trigger }: Props) => {
   const { hasReacted, handleReactionClick } = useReactionActions({
     memo,
     onComplete: () => setOpen(false),
+    entryPoint: "picker",
   });
 
   return (

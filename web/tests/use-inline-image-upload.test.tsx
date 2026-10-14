@@ -76,7 +76,7 @@ describe("useInlineImageUpload", () => {
     act(() => result.current.insertLocalImages([localFile]));
 
     await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
-    expect(upload).toHaveBeenCalledWith(localFile);
+    expect(upload).toHaveBeenCalledWith(localFile, undefined, "inline_image");
   });
 
   test("retries only failed files and preserves their original placement", async () => {
