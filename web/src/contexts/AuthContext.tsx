@@ -3,6 +3,7 @@ import { createContext, type ReactNode, useCallback, useContext, useMemo, useSta
 import { clearAccessToken, getAccessToken } from "@/auth-state";
 import { authServiceClient, refreshAccessToken, userServiceClient } from "@/connect";
 import { userKeys } from "@/hooks/useUserQueries";
+import { clearPendoSession, identifyPendoVisitor } from "@/lib/pendo";
 import type {
   User,
   UserSetting_GeneralSetting,
@@ -138,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isInitialized: true,
         isLoading: false,
       });
+      identifyPendoVisitor(currentUser, settings.userGeneralSetting);
     } catch (error) {
       console.error("Failed to initialize auth:", error);
       clearAccessToken();
@@ -152,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("[AuthContext] Failed to sign out:", error);
     } finally {
       clearAccessToken();
+      clearPendoSession();
       setState(UNAUTHENTICATED_STATE);
       queryClient.clear();
     }
