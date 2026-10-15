@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { toast } from "react-hot-toast";
 import { useInstance } from "@/contexts/InstanceContext";
 import { handleError } from "@/lib/error";
+import { getChangedFields, getInstanceSettingTrackProperties, trackPendoEvent } from "@/lib/pendo";
 import { InstanceSetting, InstanceSetting_Key } from "@/types/proto/api/instance_service_pb";
 import { useTranslate } from "@/utils/i18n";
 
@@ -16,7 +17,7 @@ export const buildInstanceSettingName = (key: InstanceSetting_Key) => `instance/
 
 const useInstanceSettingUpdater = () => {
   const t = useTranslate();
-  const { updateSetting, fetchSetting } = useInstance();
+  const { updateSetting, fetchSetting, settings } = useInstance();
 
   return useCallback(
     async ({ key, setting, errorContext, showSuccessToast = true }: SaveInstanceSettingOptions) => {
@@ -27,6 +28,12 @@ const useInstanceSettingUpdater = () => {
         if (key !== InstanceSetting_Key.ACCESS) {
           await fetchSetting(key);
         }
+        // Field names and a summary of key values only: never secrets, credentials or custom scripts.
+        trackPendoEvent("instance_setting_updated", () => ({
+          setting_key: InstanceSetting_Key[key],
+          changed_fields: getChangedFields(settings.find((item) => item.name === setting.name)?.value.value, setting.value.value ?? {}),
+          ...getInstanceSettingTrackProperties(setting),
+        }));
         if (showSuccessToast) {
           toast.success(t("message.update-succeed"));
         }
@@ -36,7 +43,7 @@ const useInstanceSettingUpdater = () => {
         return false;
       }
     },
-    [fetchSetting, t, updateSetting],
+    [fetchSetting, settings, t, updateSetting],
   );
 };
 

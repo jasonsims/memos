@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { identityProviderServiceClient } from "@/connect";
 import { absolutifyLink } from "@/lib/browser";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import {
   FieldMapping,
   FieldMappingSchema,
@@ -374,6 +375,14 @@ function CreateIdentityProviderDialog({ open, onOpenChange, identityProvider, on
         });
         toast.success(t("setting.sso.sso-updated", { name: basicInfo.title }));
       }
+      // Never the client secret or endpoints.
+      trackPendoEvent("identity_provider_saved", () => ({
+        action: isCreating ? "created" : "updated",
+        template: isCreating ? selectedTemplate : undefined,
+        provider_type: IdentityProvider_Type[type],
+        scope_count: normalizedScopes.length,
+        has_identifier_filter: Boolean(basicInfo.identifierFilter.trim()),
+      }));
     } catch (error: unknown) {
       setIsSubmitting(false);
       await handleError(error, toast.error, {

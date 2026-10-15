@@ -1,7 +1,16 @@
 import { type Timestamp, timestampDate } from "@bufbuild/protobuf/wkt";
+import { isEqual } from "lodash-es";
 import { getAccessToken } from "@/auth-state";
 import { ROUTES } from "@/router/routes";
 import { State } from "@/types/proto/api/common_pb";
+import {
+  InstanceAccessMode,
+  type InstanceSetting,
+  InstanceSetting_AIProviderType,
+  type InstanceSetting_AISetting,
+  InstanceSetting_StorageType,
+} from "@/types/proto/api/instance_service_pb";
+import { type Memo, Visibility } from "@/types/proto/api/memo_service_pb";
 import { type User, User_Role, type UserSetting_GeneralSetting } from "@/types/proto/api/user_service_pb";
 
 // The OAuth callback receives a one-time authorization code and the CSRF state on its query string.
@@ -85,3 +94,176 @@ export const clearPendoSession = (): void =>
   withPendo((pendo) => {
     if (pendo.clearSession) pendo.clearSession();
   });
+
+/**
+ * Track events registered in Pendo. Pendo matches a track type by its exact name, so a reworded or re-cased name
+ * silently starts a new, empty track type: never rename one.
+ */
+export type PendoTrackEvent =
+  // Authentication and account access
+  | "user_signed_up"
+  | "user_signed_in"
+  | "user_sign_in_failed"
+  | "sso_sign_in_initiated"
+  | "linked_identity_added"
+  // Composing memos
+  | "memo_created"
+  | "memo_updated"
+  | "memo_save_failed"
+  | "memo_comment_created"
+  | "memo_suggestion_accepted"
+  | "attachment_uploaded"
+  | "attachment_upload_failed"
+  | "audio_note_recorded"
+  | "audio_transcription_completed"
+  // Acting on memos
+  | "memo_pin_toggled"
+  | "memo_archive_state_changed"
+  | "memo_deleted"
+  | "memo_task_toggled"
+  | "memo_tasks_bulk_toggled"
+  | "memo_reaction_toggled"
+  | "memo_share_link_created"
+  | "memo_share_link_revoked"
+  | "memo_image_exported"
+  | "inbox_notification_opened"
+  // Finding memos
+  | "memo_search_submitted"
+  | "memo_search_completed"
+  | "tag_filter_applied"
+  | "memo_view_applied"
+  | "memo_view_saved"
+  | "memo_view_deleted"
+  | "memo_view_filter_validated"
+  | "tag_rules_saved"
+  // Spaces
+  | "space_created"
+  | "space_deleted"
+  | "space_invitation_sent"
+  | "space_invitation_accepted"
+  | "space_invitation_declined"
+  | "space_member_role_changed"
+  | "space_member_removed"
+  | "space_left"
+  // Account and data
+  | "profile_updated"
+  | "password_changed"
+  | "account_deleted"
+  | "user_preference_changed"
+  | "access_token_created"
+  | "webhook_created"
+  | "memos_exported"
+  | "memo_import_staged"
+  | "memos_imported"
+  | "memo_import_failed"
+  | "unused_attachments_deleted"
+  // Instance administration
+  | "instance_setting_updated"
+  | "ai_provider_configured"
+  | "ai_transcription_configured"
+  | "smtp_test_email_sent"
+  | "identity_provider_saved"
+  | "member_account_created"
+  | "member_account_updated"
+  | "member_account_state_changed"
+  | "usage_limits_updated"
+  // Reliability
+  | "map_load_failed"
+  | "usage_limit_reached"
+  | "app_error_encountered";
+
+export type PendoTrackProperties = Record<string, PendoTrackValue | undefined>;
+
+/**
+ * Sends a track event for the current visitor; the agent attaches the visitor, account, URL and time itself.
+ * Properties are built by a callback so they cost nothing without the agent, and so a failure while building them
+ * is contained like any other analytics failure instead of breaking the flow being tracked.
+ */
+export const trackPendoEvent = (event: PendoTrackEvent, getProperties?: () => PendoTrackProperties): void =>
+  withPendo((pendo) => pendo.track(event, getProperties?.()));
+
+const MINUTE_MS = 60 * 1000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
+const elapsedSince = (timestamp: Timestamp | undefined, unitMs: number): number | undefined =>
+  timestamp ? Math.floor((Date.now() - timestampDate(timestamp).getTime()) / unitMs) : undefined;
+
+/** Whole minutes since a timestamp, e.g. how long a notification waited. */
+export const minutesSince = (timestamp: Timestamp | undefined) => elapsedSince(timestamp, MINUTE_MS);
+
+/** Whole days since a timestamp, e.g. the age of an account or a share link. */
+export const daysSince = (timestamp: Timestamp | undefined) => elapsedSince(timestamp, DAY_MS);
+
+// Free text such as an error message can carry what an event must not: an address, a URL whose path holds a token,
+// or a secret, masked or not.
+const URL_AFTER_ORIGIN = /\b(https?:\/\/[^\s/?#]+)\S*/gi;
+const EMAIL_ADDRESS = /[^\s@<>()[\]"',;:]+@[^\s@<>()[\]"',;:]+\.[^\s@<>()[\]"',;:]+/g;
+const SECRET_LIKE = /\S*\*{3,}\S*|[\w-]{32,}/g;
+
+/** Free text for a property: URLs cut to their origin, addresses and secret-like tokens removed, length capped. */
+export const toPendoText = (text: string | undefined, maxLength = 100): string | undefined =>
+  text?.replace(URL_AFTER_ORIGIN, "$1").replace(EMAIL_ADDRESS, "<email>").replace(SECRET_LIKE, "<redacted>").slice(0, maxLength) ||
+  undefined;
+
+/** Properties every memo event shares. Never the content. */
+export const getMemoTrackProperties = (memo: Memo): PendoTrackProperties => ({
+  visibility: Visibility[memo.visibility],
+  is_comment: Boolean(memo.parent),
+  has_space: Boolean(memo.space),
+});
+
+// Composer draft cache keys start with the host that mounted the editor (see the MemoEditor `cacheKey` props).
+const COMPOSER_SOURCES: [cacheKeyPrefix: string, source: string][] = [
+  ["home-memo-editor", "home"],
+  ["global-memo-editor", "global_composer"],
+  ["calendar-day-editor", "calendar"],
+  ["map-editor", "map"],
+  ["inline-memo-editor-", "inline_edit"],
+];
+
+/** Which composer saved a memo, read from the editor's draft cache key. */
+export const getComposerSource = (cacheKey: string | undefined): string | undefined => {
+  if (!cacheKey) return undefined;
+  const source = COMPOSER_SOURCES.find(([prefix]) => cacheKey.startsWith(prefix))?.[1];
+  return source ?? (cacheKey.endsWith("-comment") ? "comment" : "other");
+};
+
+/** The provider and model the instance transcribes audio with. */
+export const getTranscriptionTrackProperties = (aiSetting: InstanceSetting_AISetting | undefined): PendoTrackProperties => {
+  const provider = aiSetting?.providers.find((item) => item.id === aiSetting.transcription?.providerId);
+  return {
+    transcription_provider_type: provider ? InstanceSetting_AIProviderType[provider.type] : undefined,
+    transcription_model: toPendoText(aiSetting?.transcription?.model, 50),
+  };
+};
+
+/** Top-level fields that differ between two versions of a protobuf message, named as in an update mask. */
+export const getChangedFields = (previous: object | undefined, next: object): string[] =>
+  Object.entries(next)
+    .filter(([field, value]) => !field.startsWith("$") && !isEqual(value, (previous as Record<string, unknown> | undefined)?.[field]))
+    .map(([field]) => field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`));
+
+/** The key values of a saved instance setting. Never secrets, credentials or custom script contents. */
+export const getInstanceSettingTrackProperties = ({ value }: InstanceSetting): PendoTrackProperties => {
+  switch (value.case) {
+    case "generalSetting":
+      return {
+        disallow_user_registration: value.value.disallowUserRegistration,
+        disallow_password_auth: value.value.disallowPasswordAuth,
+      };
+    case "accessSetting":
+      return { access_mode: InstanceAccessMode[value.value.accessMode] };
+    case "storageSetting": {
+      const storage = value.value.storages.find((item) => item.id === value.value.defaultStorageId);
+      return {
+        storage_type: InstanceSetting_StorageType[storage?.type ?? (value.value.storageType as number as InstanceSetting_StorageType)],
+      };
+    }
+    case "notificationSetting":
+      return { email_notifications_enabled: Boolean(value.value.email?.enabled) };
+    case "memoRelatedSetting":
+      return { reaction_count: value.value.reactions.length, enable_double_click_edit: value.value.enableDoubleClickEdit };
+    default:
+      return {};
+  }
+};

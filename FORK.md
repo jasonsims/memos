@@ -44,7 +44,7 @@ Keep the fork's changes in fork-only files where possible so upstream merges sta
 | `Dockerfile.vercel` | Vercel Container Runtime build: frontend, Go binary, Alpine runtime. |
 | `Dockerfile.vercel.dockerignore` | Build context for `Dockerfile.vercel`; upstream's `.dockerignore` excludes `web/`. |
 | `.vercelignore` | Keeps `node_modules` and build output out of Vercel CLI uploads. |
-| `web/src/lib/pendo.ts` | Pendo (Novus) analytics: anonymous boot with URL privacy transforms, sign-in identify, sign-out reset. |
+| `web/src/lib/pendo.ts` | Pendo (Novus) analytics: anonymous boot with URL privacy transforms, sign-in identify, sign-out reset, and track events (`trackPendoEvent`, the `PendoTrackEvent` name list, property helpers). |
 | `web/src/types/pendo.d.ts` | Types for the `window.pendo` agent API used by `web/src/lib/pendo.ts`. |
 
 ## Upstream File Changes
@@ -56,6 +56,17 @@ Upstream files the fork had to change. Keep these hunks minimal and re-apply the
 | `web/index.html` | Pendo install snippet in `<head>`. |
 | `web/src/main.tsx` | Calls `initializePendo()` once before the first render. |
 | `web/src/contexts/AuthContext.tsx` | Calls `identifyPendoVisitor()` when `initialize()` signs a user in and `clearPendoSession()` in `logout()`. |
+| `web/src/lib/error.ts` | `handleError` reports usage limits through `trackUsageLimitReached`; `getErrorTrackProperties` gives failure events their error fields. |
+| `web/src/components/MemoEditor/services/errorService.ts` | `getErrorMessage` takes an optional operation, to report usage limits for messages shown without `handleError`. |
+
+Track events: every upstream file that calls `trackPendoEvent` carries a fork hunk; list them with
+`git grep -l trackPendoEvent -- web/src`. Pendo matches events by their exact name, so never rename one (see
+`PendoTrackEvent`). A few upstream signatures were widened only to give events their properties: `useMemoSave`
+(`cacheKey`, `editorRef`), `memoService.save` (returns `updateMask`), `uploadService.uploadFile` (upload path),
+`useAttachmentTranscription` (AI setting), `exportMemos` (returns size and type), `useReactionActions` (`entryPoint`),
+`PasswordSignInForm` (`entry`), `CreateSpaceDialog` (`entryPoint`), `useAcceptSpaceInvitation` and
+`useDeclineSpaceInvitation` (source), and `useUpdateUserGeneralSetting` (change context). `classifyMemoListError`,
+`categorizeFile` and `isChunkLoadError` are exported for the same reason.
 
 ## Agent Instructions
 

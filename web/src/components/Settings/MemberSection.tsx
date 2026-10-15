@@ -14,6 +14,7 @@ import useCurrentUser from "@/hooks/useCurrentUser";
 import { useDialog } from "@/hooks/useDialog";
 import { useDeleteUser, useListUsers } from "@/hooks/useUserQueries";
 import { handleError } from "@/lib/error";
+import { daysSince, trackPendoEvent } from "@/lib/pendo";
 import { State } from "@/types/proto/api/common_pb";
 import { User, User_Role } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -35,6 +36,14 @@ const MemberSection = () => {
   const [deleteTarget, setDeleteTarget] = useState<User | undefined>(undefined);
 
   const stringifyUserRole = (role: User_Role) => (role === User_Role.ADMIN ? t("setting.member.admin") : t("setting.member.user"));
+
+  /** Reports an admin's state change to another account: its role and age, never who it is. */
+  const trackMemberStateChanged = (action: "archived" | "restored" | "deleted", target: User) =>
+    trackPendoEvent("member_account_state_changed", () => ({
+      action,
+      target_role: User_Role[target.role],
+      target_account_age_days: daysSince(target.createTime),
+    }));
 
   const handleCreateUser = () => {
     setEditingUser(undefined);
@@ -61,6 +70,7 @@ const MemberSection = () => {
         },
         updateMask: create(FieldMaskSchema, { paths: ["state"] }),
       });
+      trackMemberStateChanged("archived", archiveTarget);
       toast.success(t("setting.member.archive-success", { username }));
       await refetchUsers();
     } catch (error: unknown) {
@@ -79,6 +89,7 @@ const MemberSection = () => {
         },
         updateMask: create(FieldMaskSchema, { paths: ["state"] }),
       });
+      trackMemberStateChanged("restored", user);
       toast.success(t("setting.member.restore-success", { username }));
       await refetchUsers();
     } catch (error: unknown) {
@@ -95,6 +106,7 @@ const MemberSection = () => {
     const { username, name } = deleteTarget;
     deleteUserMutation.mutate(name, {
       onSuccess: () => {
+        trackMemberStateChanged("deleted", deleteTarget);
         setDeleteTarget(undefined);
         toast.success(t("setting.member.delete-success", { username }));
       },

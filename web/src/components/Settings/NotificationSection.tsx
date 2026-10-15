@@ -10,7 +10,8 @@ import { Switch } from "@/components/ui/switch";
 import { instanceServiceClient } from "@/connect";
 import { useInstance } from "@/contexts/InstanceContext";
 import useCurrentUser from "@/hooks/useCurrentUser";
-import { handleError } from "@/lib/error";
+import { getErrorTrackProperties, handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import {
   InstanceSetting_Key,
   InstanceSetting_NotificationSetting,
@@ -156,6 +157,17 @@ const NotificationSection = () => {
     }
 
     setIsTestingEmail(true);
+    // Never the SMTP password, username or recipient address.
+    const trackTestEmail = (outcome: "success" | "failure", errorMessage?: string) =>
+      trackPendoEvent("smtp_test_email_sent", () => ({
+        outcome,
+        smtp_port: emailSetting.smtpPort,
+        use_tls: emailSetting.useTls,
+        use_ssl: emailSetting.useSsl,
+        has_smtp_auth: Boolean(emailSetting.smtpUsername.trim()),
+        email_enabled: emailSetting.enabled,
+        error_message: errorMessage,
+      }));
     try {
       await instanceServiceClient.testInstanceEmailSetting(
         create(TestInstanceEmailSettingRequestSchema, {
@@ -163,8 +175,10 @@ const NotificationSection = () => {
           recipientEmail: currentUser.email,
         }),
       );
+      trackTestEmail("success");
       toast.success(t("setting.notification.test-email-success", { email: currentUser.email }));
     } catch (error: unknown) {
+      trackTestEmail("failure", getErrorTrackProperties(error).error_message);
       await handleError(error, toast.error, { context: "Send test email" });
     } finally {
       setIsTestingEmail(false);

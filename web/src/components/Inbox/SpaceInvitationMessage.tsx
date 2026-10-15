@@ -30,8 +30,8 @@ function SpaceInvitationMessage({ notification }: Props) {
   const currentUser = useCurrentUser();
   const viewerName = currentUser?.name ?? "";
   const { selectSpace } = useSpaceContext();
-  const acceptInvitation = useAcceptSpaceInvitation(viewerName);
-  const declineInvitation = useDeclineSpaceInvitation(viewerName);
+  const acceptInvitation = useAcceptSpaceInvitation(viewerName, "inbox");
+  const declineInvitation = useDeclineSpaceInvitation(viewerName, "inbox");
   const payload = notification.payload?.case === "spaceInvitation" ? notification.payload.value : undefined;
   const space = payload?.space;
   const sender = notification.senderUser;

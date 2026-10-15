@@ -10,6 +10,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { userServiceClient } from "@/connect";
 import useLoading from "@/hooks/useLoading";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { User, User_Role, UserSchema } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
 
@@ -51,11 +52,13 @@ function CreateUserDialog({ open, onOpenChange, user: initialUser, onSuccess }: 
 
     try {
       requestState.setLoading();
+      // Roles and changed field names only: never the username or password.
       if (isCreating) {
         await userServiceClient.createUser({ user });
+        trackPendoEvent("member_account_created", () => ({ assigned_role: User_Role[user.role] }));
         toast.success("Create user successfully");
       } else {
-        const updateMask = [];
+        const updateMask: string[] = [];
         if (user.username !== initialUser?.username) {
           updateMask.push("username");
         }
@@ -67,6 +70,13 @@ function CreateUserDialog({ open, onOpenChange, user: initialUser, onSuccess }: 
         }
         const userToUpdate = create(UserSchema, { ...user, name: initialUser?.name ?? user.name });
         await userServiceClient.updateUser({ user: userToUpdate, updateMask: create(FieldMaskSchema, { paths: updateMask }) });
+        trackPendoEvent("member_account_updated", () => ({
+          changed_fields: updateMask,
+          previous_role: initialUser ? User_Role[initialUser.role] : undefined,
+          new_role: User_Role[user.role],
+          role_changed: updateMask.includes("role"),
+          password_reset: updateMask.includes("password"),
+        }));
         toast.success("Update user successfully");
       }
       requestState.setFinish();

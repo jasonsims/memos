@@ -18,7 +18,10 @@ import SettingSection from "./SettingSection";
 const PreferencesSection = () => {
   const t = useTranslate();
   const { currentUser, userGeneralSetting: generalSetting, refetchSettings } = useAuth();
-  const { mutate: updateUserGeneralSetting, isPending: isUpdatingGeneralSetting } = useUpdateUserGeneralSetting(currentUser?.name);
+  const { mutate: updateUserGeneralSetting, isPending: isUpdatingGeneralSetting } = useUpdateUserGeneralSetting(currentUser?.name, {
+    source: "preferences",
+    previous: generalSetting,
+  });
 
   const handleLocaleSelectChange = (locale: Locale) => {
     // Apply locale immediately for instant UI feedback and persist to localStorage

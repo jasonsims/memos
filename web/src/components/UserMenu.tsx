@@ -89,7 +89,10 @@ const UserPreferenceMenu = () => {
   const t = useTranslate();
   const currentUser = useCurrentUser();
   const { userGeneralSetting, refetchSettings } = useAuth();
-  const { mutate: updateUserGeneralSetting } = useUpdateUserGeneralSetting(currentUser?.name);
+  const { mutate: updateUserGeneralSetting } = useUpdateUserGeneralSetting(currentUser?.name, {
+    source: "user_menu",
+    previous: userGeneralSetting,
+  });
   // The chosen value shows immediately, before a signed-in save round-trips.
   const [theme, setTheme] = useState<string>();
   const [locale, setLocale] = useState<string>();

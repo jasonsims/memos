@@ -11,6 +11,7 @@ import { userServiceClient } from "@/connect";
 import useCurrentUser from "@/hooks/useCurrentUser";
 import useLoading from "@/hooks/useLoading";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { CreatePersonalAccessTokenResponse } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
 
@@ -83,6 +84,12 @@ function CreateAccessTokenDialog({ open, onOpenChange, onSuccess }: Props) {
         description: state.description,
         expiresInDays: state.expiration,
       });
+      // Never the token or the description text.
+      trackPendoEvent("access_token_created", () => ({
+        expires_in_days: state.expiration || undefined,
+        never_expires: state.expiration === 0,
+        description_length: state.description.length,
+      }));
 
       requestState.setFinish();
       onSuccess(response);

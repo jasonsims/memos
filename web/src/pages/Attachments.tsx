@@ -24,7 +24,8 @@ import useDialog from "@/hooks/useDialog";
 import { useUsersByNames } from "@/hooks/useUserQueries";
 import i18n from "@/i18n";
 import { combineCELFilters } from "@/lib/cel-filter";
-import { handleError } from "@/lib/error";
+import { getErrorTrackProperties, handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { ListAttachmentsRequestSchema } from "@/types/proto/api/attachment_service_pb";
 import { useTranslate } from "@/utils/i18n";
 
@@ -125,6 +126,18 @@ const Attachments = () => {
   };
 
   const handleDeleteUnusedAttachments = async () => {
+    // Counted as each batch lands: when a later one fails, the server has already deleted these.
+    const progress = { deletedCount: 0, batchCount: 0, reported: false };
+    const trackDeleted = (outcome: "success" | "failure", errorMessage?: string) => {
+      progress.reported = true;
+      trackPendoEvent("unused_attachments_deleted", () => ({
+        outcome,
+        deleted_count: progress.deletedCount,
+        batch_count: progress.batchCount,
+        creator_scoped: Boolean(creatorUsername),
+        error_message: errorMessage,
+      }));
+    };
     try {
       const names = await listUnusedAttachmentNames(memoFilter, selectedSpaceName);
 
@@ -135,11 +148,16 @@ const Attachments = () => {
 
       for (const chunk of chunkNames(names, BATCH_DELETE_SIZE)) {
         await batchDeleteAttachments(chunk);
+        progress.deletedCount += chunk.length;
+        progress.batchCount += 1;
       }
 
+      trackDeleted("success");
       toast.success(t("resource.delete-all-unused-success"));
       await Promise.all([refetch(), refetchUnused()]);
     } catch (deleteError) {
+      // A refresh failing after a successful delete was already reported as a success.
+      if (!progress.reported) trackDeleted("failure", getErrorTrackProperties(deleteError).error_message);
       handleError(deleteError, toast.error, {
         context: "Failed to delete unused attachments",
         fallbackMessage: t("resource.delete-all-unused-error"),

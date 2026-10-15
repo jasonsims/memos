@@ -14,6 +14,7 @@ import useCurrentUser from "@/hooks/useCurrentUser";
 import { useUpdateUser } from "@/hooks/useUserQueries";
 import { convertFileToBase64 } from "@/lib/browser";
 import { handleError, hasConnectCode } from "@/lib/error";
+import { identifyPendoVisitor, trackPendoEvent } from "@/lib/pendo";
 import { useTranslate } from "@/utils/i18n";
 import UserAvatar from "./UserAvatar";
 
@@ -34,7 +35,7 @@ interface State {
 function UpdateAccountDialog({ open, onOpenChange, onSuccess }: Props) {
   const t = useTranslate();
   const currentUser = useCurrentUser();
-  const { setCurrentUser } = useAuth();
+  const { setCurrentUser, userGeneralSetting } = useAuth();
   const { generalSetting: instanceGeneralSetting } = useInstance();
   const { mutateAsync: updateUser } = useUpdateUser();
   const [state, setState] = useState<State>({
@@ -117,7 +118,7 @@ function UpdateAccountDialog({ open, onOpenChange, onSuccess }: Props) {
     }
 
     try {
-      const updateMask = [];
+      const updateMask: string[] = [];
       if (!isEqual(currentUser?.username, state.username)) {
         updateMask.push("username");
       }
@@ -145,6 +146,16 @@ function UpdateAccountDialog({ open, onOpenChange, onSuccess }: Props) {
         updateMask,
       });
       setCurrentUser(updatedUser);
+      // Which fields changed, never their values: the username and email are personal data.
+      trackPendoEvent("profile_updated", () => ({
+        changed_fields: updateMask,
+        field_count: updateMask.length,
+        avatar_changed: updateMask.includes("avatar_url"),
+        username_changed: updateMask.includes("username"),
+        email_changed: updateMask.includes("email"),
+      }));
+      // Visitor metadata is otherwise only sent at sign-in.
+      identifyPendoVisitor(updatedUser, userGeneralSetting);
       toast.success(t("message.update-succeed"));
       onSuccess?.();
       onOpenChange(false);

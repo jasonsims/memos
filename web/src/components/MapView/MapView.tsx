@@ -12,6 +12,7 @@ import { useMemoFilterContext } from "@/contexts/MemoFilterContext";
 import { useSpaceContext } from "@/contexts/SpaceContext";
 import useCurrentUser from "@/hooks/useCurrentUser";
 import useMediaQuery from "@/hooks/useMediaQuery";
+import { trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
 import { LocationSchema } from "@/types/proto/api/memo_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -50,6 +51,21 @@ export function MapView() {
   const [tileError, setTileError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [composing, setComposing] = useState(false);
+  // The user only sees a retry banner, so report each failure as it first shows. A burst of
+  // failing tiles is one failure; a retry that fails again is another.
+  const reportLoadFailure = (failureType: "tiles" | "memos") =>
+    trackPendoEvent("map_load_failed", () => ({
+      failure_type: failureType,
+      memos_loaded_count: query.memos.length,
+      query_complete: query.complete,
+      is_desktop: desktop,
+    }));
+  useEffect(() => {
+    if (tileError) reportLoadFailure("tiles");
+  }, [tileError]);
+  useEffect(() => {
+    if (query.isError) reportLoadFailure("memos");
+  }, [query.isError]);
   const viewport = readViewport(location.search);
   // Selection is keyed by its joined names so panning, which rewrites the search, leaves it identity-stable.
   const selectedKey = new URLSearchParams(location.search).getAll("memo").join("|");

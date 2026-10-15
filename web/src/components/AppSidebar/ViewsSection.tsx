@@ -14,6 +14,7 @@ import useCurrentUser from "@/hooks/useCurrentUser";
 import { useMemoViews, userKeys } from "@/hooks/useUserQueries";
 import { handleError } from "@/lib/error";
 import { getMemoViewId, isMemoCollectionRoute } from "@/lib/memo-views";
+import { trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
 import { getCollectionHomePath, ROUTES } from "@/router/routes";
 import type { MemoView } from "@/types/proto/api/user_service_pb";
@@ -47,6 +48,17 @@ const ViewsSection = ({ manageActive = false }: { manageActive?: boolean }) => {
   const location = useLocation();
 
   const handleView = (viewId: string) => {
+    trackPendoEvent("memo_view_applied", () => {
+      const view = memoViews.find((item) => getMemoViewId(item.name) === viewId);
+      return {
+        view_id: viewId,
+        action: selectedMemoView === viewId ? "cleared" : "applied",
+        has_icon: Boolean(view?.icon),
+        filter_length: view?.filter.length,
+        navigated_to_collection: !isMemoCollectionRoute(location.pathname),
+        view_count: memoViews.length,
+      };
+    });
     setMemoView(selectedMemoView === viewId ? undefined : viewId);
     if (!isMemoCollectionRoute(location.pathname)) navigate({ pathname: getCollectionHomePath(location), search: location.search });
     setMobileOpen(false);
@@ -61,6 +73,12 @@ const ViewsSection = ({ manageActive = false }: { manageActive?: boolean }) => {
     if (!deleteTarget) return;
     try {
       await userServiceClient.deleteMemoView({ name: deleteTarget.name });
+      trackPendoEvent("memo_view_deleted", () => ({
+        view_id: getMemoViewId(deleteTarget.name),
+        was_active: selectedMemoView === getMemoViewId(deleteTarget.name),
+        source: "sidebar",
+        remaining_view_count: memoViews.length - 1,
+      }));
       await queryClient.invalidateQueries({ queryKey: userKeys.memoViews(currentUser?.name) });
       if (selectedMemoView === getMemoViewId(deleteTarget.name)) setMemoView(undefined);
       toast.success(t("setting.memo-view.delete-success", { title: deleteTarget.title }));

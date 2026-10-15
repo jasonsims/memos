@@ -1,12 +1,15 @@
 import type { ComponentType } from "react";
 import { lazy } from "react";
 
-const reloadOnChunkLoadError = (error: unknown) => {
+/** Whether a dynamic import failed to fetch its chunk, as happens when a redeploy replaced it. */
+export const isChunkLoadError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : "";
-  const isChunkError =
-    message.includes("Failed to fetch dynamically imported module") || message.includes("Importing a module script failed");
+  return message.includes("Failed to fetch dynamically imported module") || message.includes("Importing a module script failed");
+};
+
+const reloadOnChunkLoadError = (error: unknown) => {
   const reloadKey = "chunk-reload";
-  if (isChunkError && !sessionStorage.getItem(reloadKey)) {
+  if (isChunkLoadError(error) && !sessionStorage.getItem(reloadKey)) {
     sessionStorage.setItem(reloadKey, "1");
     window.location.reload();
   }

@@ -12,6 +12,7 @@ import { userServiceClient } from "@/connect";
 import useCurrentUser from "@/hooks/useCurrentUser";
 import useLoading from "@/hooks/useLoading";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { useTranslate } from "@/utils/i18n";
 
 interface Props {
@@ -145,6 +146,11 @@ function CreateWebhookDialog({ open, onOpenChange, webhookName, onSuccess }: Pro
         } catch {
           // Reveal failed — the secret is still set and can be revealed later from the edit dialog.
         }
+        // Only the host: webhook URLs such as Slack's carry a secret in the path. Never the signing secret.
+        trackPendoEvent("webhook_created", () => {
+          const url = URL.canParse(state.url) ? new URL(state.url) : undefined;
+          return { url_host: url?.hostname, url_protocol: url?.protocol.replace(/:$/, ""), signing_secret_revealed: secret !== undefined };
+        });
         requestState.setFinish();
         if (secret !== undefined) {
           setCreatedSecret(secret);

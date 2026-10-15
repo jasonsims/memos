@@ -2,9 +2,11 @@ import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { CheckIcon, MessageCircleIcon, TrashIcon, XIcon } from "lucide-react";
 import toast from "react-hot-toast";
 import UserAvatar from "@/components/UserAvatar";
+import { useAppSidebar } from "@/contexts/AppSidebarContext";
 import useNavigateTo from "@/hooks/useNavigateTo";
 import { useArchiveNotification, useDeleteNotification } from "@/hooks/useUserQueries";
 import { handleError } from "@/lib/error";
+import { minutesSince, trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
 import { UserNotification, UserNotification_Status } from "@/types/proto/api/user_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -18,6 +20,7 @@ function MemoCommentMessage({ notification }: Props) {
   const archiveNotification = useArchiveNotification();
   const deleteNotification = useDeleteNotification();
   const navigateTo = useNavigateTo();
+  const { inboxFilter } = useAppSidebar();
   const commentPayload = notification.payload?.case === "memoComment" ? notification.payload.value : undefined;
   const sender = notification.senderUser;
 
@@ -66,6 +69,12 @@ function MemoCommentMessage({ notification }: Props) {
   const isUnread = notification.status === UserNotification_Status.UNREAD;
 
   const handleNavigateToMemo = async () => {
+    trackPendoEvent("inbox_notification_opened", () => ({
+      notification_type: "memo_comment",
+      was_unread: isUnread,
+      notification_age_minutes: minutesSince(notification.createTime),
+      inbox_filter: inboxFilter,
+    }));
     navigateTo(`/${commentPayload.relatedMemo}`);
     if (isUnread) {
       await handleArchiveMessage(true);

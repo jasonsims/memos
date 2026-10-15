@@ -8,11 +8,13 @@ import { memoKeys, useDeleteMemo, useUpdateMemo } from "@/hooks/useMemoQueries";
 import useNavigateTo from "@/hooks/useNavigateTo";
 import { userKeys } from "@/hooks/useUserQueries";
 import { handleError } from "@/lib/error";
+import { getMemoTrackProperties, trackPendoEvent } from "@/lib/pendo";
 import { extractMemoIdFromName } from "@/lib/resource-names";
 import { ROUTES } from "@/router/routes";
 import { State } from "@/types/proto/api/common_pb";
 import type { Memo } from "@/types/proto/api/memo_service_pb";
 import { useTranslate } from "@/utils/i18n";
+import { extractTasks } from "@/utils/markdown-manipulation";
 import { checkAllTasks, uncheckAllTasks } from "@/utils/markdown-task-actions";
 import { isMemoDetailPath } from "../MemoView/navigation";
 
@@ -39,7 +41,7 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
   }, [queryClient]);
 
   const updateMemoContent = useCallback(
-    async (nextContent: string, context: string) => {
+    async (nextContent: string, context: string, action: "check_all" | "uncheck_all") => {
       if (nextContent === memo.content) {
         return;
       }
@@ -52,6 +54,11 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
           },
           updateMask: ["content", "update_time"],
         });
+        trackPendoEvent("memo_tasks_bulk_toggled", () => ({
+          ...getMemoTrackProperties(memo),
+          action,
+          tasks_changed_count: extractTasks(memo.content).filter((task) => task.checked !== (action === "check_all")).length,
+        }));
         toast.success(t("memo.task-actions.updated"));
       } catch (error: unknown) {
         handleError(error, toast.error, {
@@ -60,7 +67,7 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
         });
       }
     },
-    [memo.content, memo.name, t, updateMemo],
+    [memo, t, updateMemo],
   );
 
   const handleTogglePinMemoBtnClick = useCallback(async () => {
@@ -72,10 +79,15 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
         },
         updateMask: ["pinned"],
       });
+      trackPendoEvent("memo_pin_toggled", () => ({
+        ...getMemoTrackProperties(memo),
+        pinned: !memo.pinned,
+        from_detail_page: isInMemoDetailPage,
+      }));
     } catch {
       // do nothing
     }
-  }, [memo.name, memo.pinned, updateMemo]);
+  }, [isInMemoDetailPage, memo, updateMemo]);
 
   const handleEditMemoClick = useCallback(() => {
     onEdit?.();
@@ -94,6 +106,12 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
         },
         updateMask: ["state"],
       });
+      trackPendoEvent("memo_archive_state_changed", () => ({
+        ...getMemoTrackProperties(memo),
+        new_state: State[state],
+        from_detail_page: isInMemoDetailPage,
+        was_pinned: memo.pinned,
+      }));
       toast.success(message);
     } catch (error: unknown) {
       handleError(error, toast.error, {
@@ -107,7 +125,7 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
       navigateTo(memo.state === State.ARCHIVED ? ROUTES.HOME : ROUTES.ARCHIVED);
     }
     memoUpdatedCallback();
-  }, [memo.name, memo.state, t, isInMemoDetailPage, navigateTo, memoUpdatedCallback, updateMemo]);
+  }, [memo, t, isInMemoDetailPage, navigateTo, memoUpdatedCallback, updateMemo]);
 
   const handleCopyLink = useCallback(() => {
     let host = profile.instanceUrl;
@@ -126,11 +144,11 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
   }, [memo.content, t]);
 
   const handleCheckAllTaskListItemsClick = useCallback(async () => {
-    await updateMemoContent(checkAllTasks(memo.content), "Check memo task list items");
+    await updateMemoContent(checkAllTasks(memo.content), "Check memo task list items", "check_all");
   }, [memo.content, updateMemoContent]);
 
   const handleUncheckAllTaskListItemsClick = useCallback(async () => {
-    await updateMemoContent(uncheckAllTasks(memo.content), "Uncheck memo task list items");
+    await updateMemoContent(uncheckAllTasks(memo.content), "Uncheck memo task list items", "uncheck_all");
   }, [memo.content, updateMemoContent]);
 
   const handleDeleteMemoClick = useCallback(() => {
@@ -144,6 +162,13 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
       handleError(error, toast.error, { context: "Delete memo", fallbackMessage: "An error occurred" });
       return;
     }
+    trackPendoEvent("memo_deleted", () => ({
+      ...getMemoTrackProperties(memo),
+      was_archived: memo.state === State.ARCHIVED,
+      from_detail_page: isInMemoDetailPage,
+      attachment_count: memo.attachments.length,
+      reaction_count: memo.reactions.length,
+    }));
     toast.success(t("message.deleted-successfully"));
     if (memo.parent) {
       queryClient.invalidateQueries({ queryKey: memoKeys.comments(memo.parent) });
@@ -153,7 +178,7 @@ export const useMemoActionHandlers = ({ memo, parentPage, onEdit, setDeleteDialo
       navigateTo(parentPage || ROUTES.HOME);
     }
     memoUpdatedCallback();
-  }, [memo.name, memo.parent, t, isInMemoDetailPage, parentPage, navigateTo, memoUpdatedCallback, deleteMemo, queryClient]);
+  }, [memo, t, isInMemoDetailPage, parentPage, navigateTo, memoUpdatedCallback, deleteMemo, queryClient]);
 
   return {
     isInMemoDetailPage,

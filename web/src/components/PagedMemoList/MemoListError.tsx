@@ -18,7 +18,7 @@ const MESSAGE_KEYS = {
   load: "search.load-error",
 } as const;
 
-const classify = (error: unknown): keyof typeof MESSAGE_KEYS => {
+export const classifyMemoListError = (error: unknown): keyof typeof MESSAGE_KEYS => {
   if (hasConnectCode(error, Code.InvalidArgument)) return "invalid";
   if (hasConnectCode(error, Code.PermissionDenied, Code.Unauthenticated)) return "denied";
   return "load";
@@ -27,7 +27,7 @@ const classify = (error: unknown): keyof typeof MESSAGE_KEYS => {
 const MemoListError = ({ error, onRetry, onEditQuery, onClearQuery }: Props) => {
   const t = useTranslate();
   const [retrying, setRetrying] = useState(false);
-  const kind = classify(error);
+  const kind = classifyMemoListError(error);
 
   const handleRetry = async () => {
     setRetrying(true);

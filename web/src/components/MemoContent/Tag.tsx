@@ -5,6 +5,7 @@ import { type MemoFilter, stringifyFilters, useMemoFilterContext } from "@/conte
 import useNavigateTo from "@/hooks/useNavigateTo";
 import { colorToHex } from "@/lib/color";
 import { tagStyles } from "@/lib/markdownStyles";
+import { trackPendoEvent } from "@/lib/pendo";
 import { findTagMetadata } from "@/lib/tag";
 import { cn } from "@/lib/utils";
 import { Routes } from "@/router";
@@ -45,11 +46,18 @@ export const Tag: React.FC<TagProps> = ({ "data-tag": dataTag, children, classNa
 
     // If the tag is clicked in a memo detail page, we should navigate to the memo list page.
     if (isMemoResourcePath(location.pathname)) {
+      // Tag names are the user's own words, so only their shape is reported.
+      trackPendoEvent("tag_filter_applied", () => ({ action: "applied", tag_depth: tag.split("/").length, source: "memo_detail" }));
       navigateTo(withMemoFilter(parentPage || Routes.HOME, stringifyFilters([{ factor: "tagSearch", value: tag }])));
       return;
     }
 
     const isActive = getFiltersByFactor("tagSearch").some((filter: MemoFilter) => filter.value === tag);
+    trackPendoEvent("tag_filter_applied", () => ({
+      action: isActive ? "removed" : "applied",
+      tag_depth: tag.split("/").length,
+      source: "memo_content",
+    }));
     if (isActive) {
       removeFilter((f: MemoFilter) => f.factor === "tagSearch" && f.value === tag);
     } else {

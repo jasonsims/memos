@@ -12,6 +12,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useMemoFilterContext } from "@/contexts/MemoFilterContext";
 import { useLocalStorage, useOverflowTitle } from "@/hooks";
+import { trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
 import { useTranslate } from "@/utils/i18n";
 import TagTree, { tagRowAriaLabel } from "../TagTree";
@@ -92,6 +93,14 @@ const TagsSection = ({ tagCount, onSelect, scope }: Props) => {
 
   const handleTagClick = (tag: string) => {
     const active = activeTags.has(tag);
+    // Tag names are the user's own words, so only their shape is reported.
+    trackPendoEvent("tag_filter_applied", () => ({
+      action: active ? "removed" : "applied",
+      tag_depth: tag.split("/").length,
+      tag_memo_count: tagCount[tag],
+      source: "sidebar",
+      view_mode: treeMode ? "tree" : "flat",
+    }));
     if (active) {
       removeFilter((filter) => filter.factor === "tagSearch" && filter.value === tag);
     } else {

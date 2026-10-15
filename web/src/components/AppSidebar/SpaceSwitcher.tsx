@@ -276,7 +276,7 @@ function SpaceSwitcher({ className, size = "md" }: { className?: string; size?: 
           <UserMenu onClose={() => setOpen(false)} />
         </PopoverContent>
       </Popover>
-      <CreateSpaceDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={selectSpace} />
+      <CreateSpaceDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={selectSpace} entryPoint="sidebar" />
     </>
   );
 }

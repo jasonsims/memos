@@ -12,6 +12,7 @@ import { useSpaceContext } from "@/contexts/SpaceContext";
 import useCurrentUser from "@/hooks/useCurrentUser";
 import { useMemoViews } from "@/hooks/useUserQueries";
 import { getMemoViewId, isMemoCollectionRoute } from "@/lib/memo-views";
+import { trackPendoEvent } from "@/lib/pendo";
 import { extractSpaceUidFromName, formatSpaceUidForDisplay } from "@/lib/space-display";
 import { cn } from "@/lib/utils";
 import { getCollectionCreator, withCollectionCreator } from "@/router/routes";
@@ -114,6 +115,23 @@ const QuickFindDialog = () => {
 
   const submitQuery = () => {
     const submission = resolveQuickFindSubmission(location.pathname, query, filters, mode, location.search);
+    // Lengths and counts only: a memo search can hold personal text. An empty query clears the search instead.
+    if (query.trim()) {
+      trackPendoEvent("memo_search_submitted", () => {
+        const searchFilterCount = submission.filters.filter(isSearchFilter).length;
+        return {
+          search_mode: mode,
+          query_length: query.trim().length,
+          term_count: searchFilterCount,
+          search_scope: getRouteActionPolicy(location.pathname, location.search).searchScope,
+          route_kind: getSidebarRouteKind(location.pathname),
+          redirected: Boolean(submission.destination),
+          preserved_filter_count: submission.filters.length - searchFilterCount,
+          space_scoped: Boolean(selectedSpaceName),
+          view_applied: Boolean(selectedMemoView) && !submission.destination,
+        };
+      });
+    }
 
     if (submission.destination) {
       setMemoView(undefined);

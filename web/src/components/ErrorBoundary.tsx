@@ -1,7 +1,30 @@
 import { AlertCircle, RefreshCw } from "lucide-react";
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode, useEffect } from "react";
 import { useRouteError } from "react-router-dom";
+import { toPendoText, trackPendoEvent } from "@/lib/pendo";
+import { isChunkLoadError } from "@/utils/lazy";
 import { Button } from "./ui/button";
+
+// Module scope: a fallback that remounts for an error it already reported does not report it again.
+const reportedErrors = new WeakSet<object>();
+
+const trackAppError = (errorType: "render" | "route", error: unknown, componentStack?: string | null) =>
+  trackPendoEvent("app_error_encountered", () => ({
+    error_type: errorType,
+    error_name: error instanceof Error ? error.name : typeof error,
+    error_message: toPendoText(error instanceof Error ? error.message : undefined),
+    is_chunk_load_error: isChunkLoadError(error),
+    // The innermost component, e.g. "at MemoView (…)" becomes "MemoView".
+    component_stack_top: toPendoText(
+      componentStack
+        ?.trim()
+        .split("\n")[0]
+        ?.trim()
+        .replace(/^at /, "")
+        .split(/[\s@(]/)[0],
+      80,
+    ),
+  }));
 
 interface Props {
   children: ReactNode;
@@ -25,6 +48,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught an error:", error, errorInfo);
+    trackAppError("render", error, errorInfo.componentStack);
   }
 
   handleReset = () => {
@@ -73,6 +97,14 @@ export class ErrorBoundary extends Component<Props, State> {
 // React Router errorElement for route-level errors (e.g., failed chunk loads after redeployment).
 export function ChunkLoadErrorFallback() {
   const error = useRouteError() as Error | undefined;
+
+  useEffect(() => {
+    if (typeof error === "object" && error !== null) {
+      if (reportedErrors.has(error)) return;
+      reportedErrors.add(error);
+    }
+    trackAppError("route", error);
+  }, [error]);
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background">

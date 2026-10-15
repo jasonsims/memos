@@ -1,4 +1,5 @@
 import { timestampDate } from "@bufbuild/protobuf/wkt";
+import { ConnectError } from "@connectrpc/connect";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { setAccessToken } from "@/auth-state";
@@ -6,11 +7,16 @@ import { authServiceClient, userServiceClient } from "@/connect";
 import { useAuth } from "@/contexts/AuthContext";
 import useNavigateTo from "@/hooks/useNavigateTo";
 import { absolutifyLink } from "@/lib/browser";
-import { handleError } from "@/lib/error";
+import { getErrorTrackProperties, handleError } from "@/lib/error";
+import { toPendoText, trackPendoEvent } from "@/lib/pendo";
 import { ROUTES } from "@/router/routes";
+import { type User, User_Role } from "@/types/proto/api/user_service_pb";
 import { buildAuthRoute, getSafeRedirectPath } from "@/utils/auth-redirect";
 import { useTranslate } from "@/utils/i18n";
 import { validateOAuthState } from "@/utils/oauth";
+
+// An SSO account created this recently was provisioned just in time by the sign-in itself.
+const NEW_ACCOUNT_WINDOW_MS = 5 * 60 * 1000;
 
 interface State {
   loading: boolean;
@@ -45,6 +51,14 @@ const AuthCallback = () => {
     if (error) {
       const oauthState = searchParams.get("state");
       const validatedState = oauthState ? validateOAuthState(oauthState) : null;
+      // Sign-in failure events carry the provider's error code at most: never the authorization code or state.
+      trackPendoEvent("user_sign_in_failed", () => ({
+        auth_method: "sso",
+        failure_stage: "provider",
+        oauth_error: toPendoText(error, 50),
+        identity_provider: validatedState?.identityProviderName,
+        flow_mode: validatedState?.flowMode,
+      }));
       // OAuth provider returned an error
       let errorMessage = `OAuth error: ${error}`;
       if (errorDescription) {
@@ -66,6 +80,7 @@ const AuthCallback = () => {
     const state = searchParams.get("state");
 
     if (!code || !state) {
+      trackPendoEvent("user_sign_in_failed", () => ({ auth_method: "sso", failure_stage: "missing_code_or_state" }));
       setState({
         loading: false,
         errorMessage: "Failed to authorize. Missing authorization code or state parameter.",
@@ -76,6 +91,7 @@ const AuthCallback = () => {
     // Validate OAuth state (CSRF protection) and retrieve PKCE code_verifier
     const validatedState = validateOAuthState(state);
     if (!validatedState) {
+      trackPendoEvent("user_sign_in_failed", () => ({ auth_method: "sso", failure_stage: "invalid_state" }));
       setState({
         loading: false,
         errorMessage: "Failed to authorize. Invalid or expired state parameter. This may indicate a CSRF attack attempt.",
@@ -87,6 +103,7 @@ const AuthCallback = () => {
     const redirectUri = absolutifyLink("/auth/callback");
     (async () => {
       try {
+        let signedInUser: User | undefined;
         if (flowMode === "link") {
           if (!currentUser?.name) {
             throw new Error("Failed to link account. Please sign in to Memos again and retry.");
@@ -101,6 +118,12 @@ const AuthCallback = () => {
             redirectUri,
             codeVerifier: codeVerifier || "",
           });
+          // Never the authorization code or the PKCE verifier.
+          trackPendoEvent("linked_identity_added", () => ({
+            identity_provider: identityProviderName,
+            pkce_used: Boolean(codeVerifier),
+            has_return_url: Boolean(returnUrl),
+          }));
         } else {
           const response = await authServiceClient.signIn({
             credentials: {
@@ -120,17 +143,43 @@ const AuthCallback = () => {
               response.accessTokenExpireTime ? timestampDate(response.accessTokenExpireTime) : undefined,
             );
           }
+          signedInUser = response.user;
         }
         setState({
           loading: false,
           errorMessage: "",
         });
         await initialize();
+        if (flowMode !== "link") {
+          // After initialize() identified the visitor, so the sign-in is credited to the signed-in user.
+          trackPendoEvent("user_signed_in", () => ({
+            auth_method: "sso",
+            identity_provider: identityProviderName,
+            user_role: signedInUser ? User_Role[signedInUser.role] : undefined,
+            is_new_account: signedInUser?.createTime
+              ? Date.now() - timestampDate(signedInUser.createTime).getTime() < NEW_ACCOUNT_WINDOW_MS
+              : undefined,
+            pkce_used: Boolean(codeVerifier),
+            has_redirect_path: Boolean(returnUrl),
+          }));
+        }
         // Defense-in-depth: even though `returnUrl` was sanitized before being
         // stored (see storeOAuthState in SignIn), re-validate on the way out so
         // a corrupted state entry can never be used for an open redirect.
         navigateTo(getSafeRedirectPath(returnUrl) ?? ROUTES.HOME);
       } catch (error: unknown) {
+        trackPendoEvent("user_sign_in_failed", () => {
+          const { error_reason, error_code } = getErrorTrackProperties(error);
+          return {
+            auth_method: "sso",
+            // The linking checks above throw plain errors; a failed token exchange on the server is a Connect error.
+            failure_stage: error instanceof ConnectError ? "token_exchange" : "link_check",
+            identity_provider: identityProviderName,
+            flow_mode: flowMode,
+            error_reason,
+            error_code,
+          };
+        });
         handleError(error, () => {}, {
           fallbackMessage: "Failed to authenticate.",
           onError: (err) => {

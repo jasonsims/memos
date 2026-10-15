@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTagCounts, useUpdateUserSetting } from "@/hooks/useUserQueries";
 import { colorToHex } from "@/lib/color";
+import { trackPendoEvent } from "@/lib/pendo";
 import { buildUserSettingName } from "@/lib/resource-names";
 import { isValidTagPattern } from "@/lib/tag";
 import { cn } from "@/lib/utils";
@@ -153,6 +154,20 @@ const TagsSection = () => {
       updateMask: ["tags"],
     });
     await refetchSettings();
+    // Counts only: rule keys are tag names or patterns written by the user.
+    trackPendoEvent("tag_rules_saved", () => {
+      const names = Object.keys(localTags);
+      const previousNames = Object.keys(originalSetting.tags);
+      const rules = Object.values(localTags);
+      return {
+        rule_count: names.length,
+        blur_rule_count: rules.filter((meta) => meta.blur).length,
+        color_rule_count: rules.filter((meta) => meta.color).length,
+        pattern_rule_count: names.filter((name) => /[\\^$.*+?()[\]{}|]/.test(name)).length,
+        rules_added_count: names.filter((name) => !previousNames.includes(name)).length,
+        rules_removed_count: previousNames.filter((name) => !Object.hasOwn(localTags, name)).length,
+      };
+    });
   };
 
   return (

@@ -1,8 +1,8 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { ChevronDownIcon } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { toast } from "react-hot-toast";
-import { v4 as uuidv4 } from "uuid";
+import { validate as isUuid, v4 as uuidv4 } from "uuid";
 import SpaceIconPicker from "@/components/SpaceIconPicker";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import useCurrentUser from "@/hooks/useCurrentUser";
 import { useCreateSpace } from "@/hooks/useSpaceQueries";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
 import type { Space, Space_Icon } from "@/types/proto/api/space_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -23,9 +24,11 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onCreated?: (space: Space) => void;
   note?: string;
+  /** Where the dialog was opened, reported with the track event. */
+  entryPoint?: "sidebar" | "settings";
 }
 
-function CreateSpaceDialog({ open, onOpenChange, onCreated, note }: Props) {
+function CreateSpaceDialog({ open, onOpenChange, onCreated, note, entryPoint }: Props) {
   const t = useTranslate();
   const currentUserName = useCurrentUser()?.name ?? "";
   const createSpace = useCreateSpace(currentUserName);
@@ -35,6 +38,8 @@ function CreateSpaceDialog({ open, onOpenChange, onCreated, note }: Props) {
   const [spaceUid, setSpaceUid] = useState(() => uuidv4());
   const [showCustomId, setShowCustomId] = useState(false);
   const [spaceUidConflict, setSpaceUidConflict] = useState(false);
+  // Whether a submit in this session of the dialog was refused because the ID was taken.
+  const uidConflictEncounteredRef = useRef(false);
   const isSpaceUidValid = SPACE_UID_PATTERN.test(spaceUid);
   const hasSpaceUidError = !isSpaceUidValid || spaceUidConflict;
 
@@ -46,6 +51,7 @@ function CreateSpaceDialog({ open, onOpenChange, onCreated, note }: Props) {
       setSpaceUid(uuidv4());
       setShowCustomId(false);
       setSpaceUidConflict(false);
+      uidConflictEncounteredRef.current = false;
     }
   }, [open]);
 
@@ -67,6 +73,7 @@ function CreateSpaceDialog({ open, onOpenChange, onCreated, note }: Props) {
       });
     } catch (error) {
       if (error instanceof ConnectError && error.code === Code.AlreadyExists) {
+        uidConflictEncounteredRef.current = true;
         setSpaceUidConflict(true);
         setShowCustomId(true);
       }
@@ -74,6 +81,16 @@ function CreateSpaceDialog({ open, onOpenChange, onCreated, note }: Props) {
       return;
     }
 
+    // The title and description are the user's own words, so only their presence is reported.
+    trackPendoEvent("space_created", () => ({
+      space_name: space.name,
+      has_description: Boolean(description.trim()),
+      has_icon: Boolean(icon),
+      icon_type: icon?.value.case,
+      custom_uid_used: !isUuid(spaceUid),
+      uid_conflict_encountered: uidConflictEncounteredRef.current,
+      entry_point: entryPoint,
+    }));
     toast.success(t("space.create-success"));
     onOpenChange(false);
     onCreated?.(space);

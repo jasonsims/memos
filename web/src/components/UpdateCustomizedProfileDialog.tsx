@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useInstance } from "@/contexts/InstanceContext";
 import { handleError } from "@/lib/error";
+import { trackPendoEvent } from "@/lib/pendo";
 import { buildInstanceSettingName } from "@/lib/resource-names";
 import {
   InstanceSetting_GeneralSetting_CustomProfile,
@@ -89,6 +90,11 @@ function UpdateCustomizedProfileDialog({ open, onOpenChange, onSuccess }: Props)
           },
         }),
       );
+      // Saves through updateSetting directly, so it reports the save that useInstanceSettingUpdater would.
+      trackPendoEvent("instance_setting_updated", () => ({
+        setting_key: InstanceSetting_Key[InstanceSetting_Key.GENERAL],
+        changed_fields: ["custom_profile"],
+      }));
       toast.success(t("message.update-succeed"));
       onSuccess?.();
       onOpenChange(false);

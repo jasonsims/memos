@@ -4,6 +4,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useInstance } from "@/contexts/InstanceContext";
 import { useLocalStorage } from "@/hooks";
 import useCurrentUser from "@/hooks/useCurrentUser";
+import { getErrorTrackProperties } from "@/lib/error";
+import { getTranscriptionTrackProperties, type PendoTrackProperties, trackPendoEvent } from "@/lib/pendo";
 import { cn } from "@/lib/utils";
 import { InstanceSetting_Key } from "@/types/proto/api/instance_service_pb";
 import { useTranslate } from "@/utils/i18n";
@@ -155,7 +157,7 @@ const MemoEditorImpl: React.FC<MemoEditorProps> = ({
     editor.scrollToCursor();
   }, []);
 
-  const { transcribeAttachment, transcribingAttachment } = useAttachmentTranscription(insertTranscribedText);
+  const { transcribeAttachment, transcribingAttachment } = useAttachmentTranscription(insertTranscribedText, aiSetting);
 
   const handleTranscribeRecordedAudio = useCallback(
     async (localFile: LocalFile) => {
@@ -166,18 +168,32 @@ const MemoEditorImpl: React.FC<MemoEditorProps> = ({
         return;
       }
 
+      // Never the transcript itself.
+      const trackTranscription = (outcome: "success" | "empty" | "error", details?: PendoTrackProperties) =>
+        trackPendoEvent("audio_transcription_completed", () => ({
+          source: "recording",
+          outcome,
+          audio_size_bytes: localFile.file.size,
+          content_type: localFile.file.type,
+          ...getTranscriptionTrackProperties(aiSetting),
+          ...details,
+        }));
+
       try {
         const text = (await transcriptionService.transcribeFile(localFile.file)).trim();
         if (!text) {
+          trackTranscription("empty");
           dispatch(actions.addLocalFile(localFile));
           toast.error(t("editor.audio-recorder.transcribe-empty"));
           return;
         }
 
         insertTranscribedText(text);
+        trackTranscription("success", { transcript_length: text.length });
         toast.success(t("editor.audio-recorder.transcribe-success"));
       } catch (error) {
         console.error(error);
+        trackTranscription("error", { error_message: getErrorTrackProperties(error).error_message });
         toast.error(errorService.getErrorMessage(error) || t("editor.audio-recorder.transcribe-error"));
         dispatch(actions.addLocalFile(localFile));
       } finally {
@@ -185,11 +201,18 @@ const MemoEditorImpl: React.FC<MemoEditorProps> = ({
         setIsAudioRecorderOpen(false);
       }
     },
-    [actions, canTranscribe, dispatch, insertTranscribedText, t],
+    [actions, aiSetting, canTranscribe, dispatch, insertTranscribedText, t],
   );
 
   const audioRecorder = useAudioRecorder({
     onRecordingComplete: (localFile, mode) => {
+      trackPendoEvent("audio_note_recorded", () => ({
+        duration_seconds: localFile.audioMeta ? Math.round(localFile.audioMeta.durationSeconds) : undefined,
+        mime_type: localFile.file.type,
+        file_size_bytes: localFile.file.size,
+        completion_mode: mode,
+        can_transcribe: canTranscribe,
+      }));
       if (mode === "transcribe") {
         void handleTranscribeRecordedAudio(localFile);
         return;
@@ -336,6 +359,8 @@ const MemoEditorImpl: React.FC<MemoEditorProps> = ({
     defaultSpace,
     defaultVisibility,
     defaultCreateTime,
+    cacheKey,
+    editorRef,
     discardDraft,
     onConfirm,
     onCancel: onCancel ? handleCancel : undefined,

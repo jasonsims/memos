@@ -3,6 +3,7 @@ import { FieldMaskSchema } from "@bufbuild/protobuf/wkt";
 import { type QueryClient, queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { userServiceClient } from "@/connect";
 import useCurrentUser from "@/hooks/useCurrentUser";
+import { trackPendoEvent } from "@/lib/pendo";
 import { buildUserSettingName, userNamePrefix } from "@/lib/resource-names";
 import { mergeTagCounts } from "@/lib/tag";
 import {
@@ -281,8 +282,14 @@ export function useListUsers() {
   });
 }
 
+/** Where a general-setting change was made and the setting it replaces, reported with the Pendo track event. */
+export interface UserPreferenceChangeContext {
+  source: "preferences" | "user_menu";
+  previous?: UserSetting_GeneralSetting;
+}
+
 // Hook to update user general setting (convenience wrapper)
-export function useUpdateUserGeneralSetting(currentUserName?: string) {
+export function useUpdateUserGeneralSetting(currentUserName?: string, changeContext?: UserPreferenceChangeContext) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -306,8 +313,18 @@ export function useUpdateUserGeneralSetting(currentUserName?: string) {
       });
       return updatedSetting;
     },
-    onSuccess: () => {
+    onSuccess: (_updatedSetting, { generalSetting, updateMask }) => {
       queryClient.invalidateQueries({ queryKey: [...userKeys.all, "settings"] });
+      for (const setting of updateMask) {
+        // Mask paths are snake_case; the setting's fields are camelCase.
+        const field = setting.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()) as keyof UserSetting_GeneralSetting;
+        trackPendoEvent("user_preference_changed", () => ({
+          setting,
+          new_value: String(generalSetting[field]),
+          previous_value: changeContext?.previous ? String(changeContext.previous[field]) : undefined,
+          source: changeContext?.source,
+        }));
+      }
     },
   });
 }
